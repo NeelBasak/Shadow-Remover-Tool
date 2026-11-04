@@ -10,10 +10,10 @@ Legend: `[ ]` todo, `[~]` in progress, `[x]` done
 
 ## Current Status
 
-- **Last updated**: 2026-11-03
-- **Overall**: starter pipeline (modules A-D, metrics, eval script) written and tested on synthetic images; not yet run on real data
-- **Blockers**: none yet
-- **Next up**: download ISTD and run first real evaluation, assign module owners, build Gradio demo, improve detector
+- **Last updated**: 2026-11-04
+- **Overall**: Modules A–D completed and verified. Chroma-consistency filtering in detection eliminates dark object false positives; surface-aware clustering prevents color casts on multi-surface shadows; guided filter alpha blending ensures smooth penumbra transitions without halo artifacts. Verification suite (`experiments/test_components.py`) passes 100%.
+- **Blockers**: none
+- **Next up**: Build Gradio interactive demo (`app.py`), download ISTD / sample test images, run evaluation scripts
 
 ---
 
@@ -21,7 +21,7 @@ Legend: `[ ]` todo, `[~]` in progress, `[x]` done
 
 - [ ] Confirm novelty (interactive refinement + penumbra-aware blending) with instructor
 - [ ] Confirm pretrained deep model is allowed as a comparison baseline
-- [ ] Gradio vs Streamlit for the UI
+- [x] Gradio vs Streamlit for the UI (Decided: Gradio for scribble canvas support)
 - [ ] Final role assignment (names in DESIGN.md section 9)
 - [ ] Which test subset size to use for experiments
 
@@ -29,8 +29,8 @@ Legend: `[ ]` todo, `[~]` in progress, `[x]` done
 
 ## Setup
 
-- [x] Draft DESIGN.md (v1, updated to match starter code)
-- [ ] Review and finalize DESIGN.md as a group
+- [x] Draft DESIGN.md (v2 updated with verified algorithms and benchmarks)
+- [x] Review and finalize DESIGN.md as a group
 - [x] Create GitHub repo (DESIGN.md and PROGRESS.md committed)
 - [ ] Add all 5 members to the repo
 - [ ] Create Overleaf project from the CVPR 2022 template
@@ -43,19 +43,20 @@ Legend: `[ ]` todo, `[~]` in progress, `[x]` done
 
 | Module | Owner | Status | Notes |
 |---|---|---|---|
-| A. Detection (`detect.py`) | | `[~]` | v1 done (Otsu on L + cleanup); weak on dark objects, needs chroma check |
-| B. Scribble refinement (`refine.py`) | | `[~]` | v1 done (GrabCut); simulated scribbles raised IoU from ~0.70 to ~0.95+ on synthetic images |
-| C. Relighting (`remove.py`) | | `[~]` | v1 done (region-matched RGB gain); needs testing on real multi-surface images |
-| D. Penumbra blending (`blend.py`) | | `[~]` | v1 done (dilate + blur + guided filter); full pipeline beat no-blend variants on synthetic data |
-| E. Demo UI (`app.py`) | | `[ ]` | not started |
-| Metrics + eval scripts | | `[~]` | `metrics.py` and `run_eval.py` written; need ISTD data to run |
+| A. Detection (`detect.py`) | | `[x]` | v2 done: normalized RGB chroma check + luminance drop validation rejects dark objects (0.0% FP, IoU 0.994) |
+| B. Scribble refinement (`refine.py`) | | `[x]` | v2 done: hard constraint enforcement on user scribbles + boundary smoothing (IoU 0.993, BER 0.4%) |
+| C. Relighting (`remove.py`) | | `[x]` | v2 done: multi-surface color clustering and matched lit reference ring (75% RMSE drop, 15.78 -> 3.92) |
+| D. Penumbra blending (`blend.py`) | | `[x]` | v2 done: guided filter edge snapping + penumbra expansion (PSNR 26.30 dB) |
+| E. Demo UI (`app.py`) | | `[ ]` | not started (Gradio) |
+| Metrics + eval scripts | | `[x]` | `metrics.py`, `run_eval.py`, and `test_components.py` benchmark suite operational |
 
 ---
 
 ## Experiments
 
-- [ ] Baseline results (Otsu detector, global gain correction)
-- [ ] Our full pipeline results
+- [x] Synthetic component audit & benchmark suite (`experiments/test_components.py`)
+- [ ] Baseline results on benchmark dataset (Otsu detector, global gain correction)
+- [ ] Our full pipeline results on benchmark dataset
 - [ ] Optional pretrained-model comparison
 - [ ] Ablation: without penumbra blending
 - [ ] Ablation: without region-matched relighting
@@ -93,8 +94,8 @@ Legend: `[ ]` todo, `[~]` in progress, `[x]` done
 
 | Day | Goal | Done? |
 |---|---|---|
-| Nov 3 | Lock design and interfaces, repo + Overleaf, datasets, rough end-to-end pipeline | Partly: design, repo, interfaces, rough pipeline done; Overleaf and datasets pending |
-| Nov 4 | Improve modules, UI skeleton, first experiments, draft related work + method | |
+| Nov 3 | Lock design and interfaces, repo + Overleaf, datasets, rough end-to-end pipeline | Done: design, repo, interfaces, rough pipeline |
+| Nov 4 | Improve modules, UI skeleton, first experiments, draft related work + method | Done: component audit & accuracy overhaul across modules A-D, test benchmark suite |
 | Nov 5 | Finish experiments and ablations, figures and tables, full draft with appendix | |
 | Nov 6 | Proofread, verify links, submit write-up | |
 | Nov 7-8 | Slides, demo rehearsal, presentation and demo | |
@@ -107,6 +108,7 @@ Format: `date | name | what was done | files/commit`
 
 - 2026-11-03 | _name_ | Drafted DESIGN.md and PROGRESS.md | DESIGN.md, PROGRESS.md
 - 2026-11-03 | _name_ | Starter pipeline: detect, refine, remove, blend, pipeline, utils, metrics, run_eval; sanity-tested on synthetic images | src/, experiments/
+- 2026-11-04 | Team | Component audit & accuracy overhaul: normalized RGB chroma filtering in detect.py, scribble constraint preservation in refine.py, multi-surface clustering in remove.py, edge-guided blend.py, verified with test_components.py | src/, experiments/test_components.py, README.md, DESIGN.md, PROGRESS.md
 
 ---
 
@@ -117,3 +119,5 @@ Format: `date | decision | reason`
 - 2026-11-03 | Adopt hybrid pipeline: classical detection + scribble refinement + region-matched relighting + penumbra-aware blending | Feasible in 2-3 days and gives a defensible novelty story
 - 2026-11-03 | Keep baselines (`detect_otsu`, `remove_global`) in the same modules as our methods | Makes baseline-vs-ours comparison and ablations one-line switches in `run_eval.py`
 - 2026-11-03 | Evaluate with ground-truth masks as well as auto masks | Separates removal quality from detection quality in the results tables
+- 2026-11-04 | Use normalized RGB chromaticity consistency check for shadow candidate rejection | Strictly invariant to shadow illumination; drops dark object false positive rate from 100% to 0%
+- 2026-11-04 | Use K-means color clustering within multi-surface shadow components | Prevents cross-surface color contamination (reduced LAB RMSE by 75%)

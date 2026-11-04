@@ -1,9 +1,9 @@
-"""Module A: automatic shadow detection (classical, LAB-based).
+"""Module A: automatic shadow detection (classical, LAB-based + chroma consistency).
 
 Idea: shadows are darker in the L channel but keep roughly the same
-chromaticity as the surface they fall on. We threshold L (Otsu), reject
-the result if the two classes are not clearly separated, then clean the
-mask with morphology and return a soft mask.
+chromaticity as the surface they fall on. We threshold L (Otsu), filter out
+dark objects using a chroma-consistency check against the adjacent lit surface,
+clean the mask with morphology, and return a soft mask.
 """
 import cv2
 import numpy as np
@@ -19,8 +19,15 @@ def detect_otsu(img):
     return (binary > 0).astype(np.float32)
 
 
-def detect(img, min_area_frac=0.002, min_separation=12.0, soft_sigma=2.0):
-    """Detect shadows. Returns a soft float32 mask in [0, 1] (1 = shadow).
+def detect(
+    img,
+    min_area_frac=0.002,
+    min_separation=10.0,
+    max_chroma_diff=0.035,
+    min_l_ratio=1.15,
+    soft_sigma=2.0,
+):
+    """Detect shadows with chroma-consistency filtering to reject dark objects.
 
     Args:
         img: RGB uint8 image.
@@ -28,36 +35,79 @@ def detect(img, min_area_frac=0.002, min_separation=12.0, soft_sigma=2.0):
             image are removed as noise.
         min_separation: if the mean L of the lit and shadow classes differ by
             less than this (L units, 0-100), we assume there is no shadow.
+        max_chroma_diff: maximum allowed normalized chromaticity Euclidean
+            distance between candidate shadow core and its surrounding lit ring.
+            Higher differences indicate inherently dark objects of different materials.
+        min_l_ratio: minimum ratio (L_lit / L_shadow) required for a valid shadow.
         soft_sigma: Gaussian sigma used to soften the final mask.
+
+    Returns:
+        float32 soft mask in [0, 1] (1 = shadow).
     """
     h, w = img.shape[:2]
     lab = rgb_to_lab(img)
     L = cv2.GaussianBlur(lab[..., 0], (0, 0), 1.5)
 
     L8 = np.clip(L * 255.0 / 100.0, 0, 255).astype(np.uint8)
-    thr, binary = cv2.threshold(L8, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, binary = cv2.threshold(L8, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     shadow = binary > 0
 
-    # No clear bimodality -> probably no shadow in the image.
+    # No clear bimodality -> treat as shadow-free.
     if shadow.sum() == 0 or (~shadow).sum() == 0:
         return np.zeros((h, w), np.float32)
-    if L[~shadow].mean() - L[shadow].mean() < min_separation:
+    if float(L[~shadow].mean() - L[shadow].mean()) < min_separation:
         return np.zeros((h, w), np.float32)
 
-    # Morphological cleanup.
+    # Initial morphological cleanup
     k = max(3, int(round(min(h, w) * 0.01)) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
     m = shadow.astype(np.uint8)
     m = cv2.morphologyEx(m, cv2.MORPH_OPEN, kernel)
     m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, kernel)
 
-    # Drop tiny components and fill small holes.
+    # Normalized RGB for material chromaticity comparison: r = R/(R+G+B), g = G/(R+G+B)
+    img_f = img.astype(np.float32)
+    rgb_sum = img_f.sum(axis=2, keepdims=True) + 1e-5
+    norm_rgb = img_f / rgb_sum
+
+    # Component-level chroma & luminance consistency check
     n, labels, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
     min_area = min_area_frac * h * w
+    ring_radius = max(5, int(round(min(h, w) * 0.025)) | 1)
+    ring_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ring_radius, ring_radius))
+
     keep = np.zeros_like(m)
     for i in range(1, n):
-        if stats[i, cv2.CC_STAT_AREA] >= min_area:
-            keep[labels == i] = 1
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area < min_area:
+            continue
+
+        comp = (labels == i).astype(np.uint8)
+        # Extract surrounding lit ring (outside all candidate shadows)
+        dilated = cv2.dilate(comp, ring_kernel)
+        ring = dilated & (1 - m)
+
+        # If ring is too small (e.g. shadow touches image borders), fall back to erosion check
+        if ring.sum() < max(15, int(0.05 * area)):
+            ring = dilated & (1 - comp)
+
+        if ring.sum() >= 10:
+            c_in = norm_rgb[comp > 0].mean(axis=0)
+            c_out = norm_rgb[ring > 0].mean(axis=0)
+            chroma_diff = float(np.linalg.norm(c_in - c_out))
+
+            L_in = float(L[comp > 0].mean())
+            L_out = float(L[ring > 0].mean())
+            l_ratio = L_out / max(L_in, 1e-3)
+
+            # Accept only if chromaticity is consistent and luminance actually drops
+            if chroma_diff <= max_chroma_diff and l_ratio >= min_l_ratio:
+                keep[comp > 0] = 1
+        else:
+            # Insufficient border context; preserve if area is significant
+            keep[comp > 0] = 1
+
+    # Fill small holes within kept shadow regions
     inv = (1 - keep).astype(np.uint8)
     n2, lab2, st2, _ = cv2.connectedComponentsWithStats(inv, connectivity=4)
     for i in range(1, n2):
@@ -65,4 +115,4 @@ def detect(img, min_area_frac=0.002, min_separation=12.0, soft_sigma=2.0):
             keep[lab2 == i] = 1
 
     soft = cv2.GaussianBlur(keep.astype(np.float32), (0, 0), soft_sigma)
-    return np.clip(soft, 0, 1).astype(np.float32)
+    return np.clip(soft, 0.0, 1.0).astype(np.float32)
