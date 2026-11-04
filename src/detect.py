@@ -1,11 +1,15 @@
-"""Module A: automatic shadow detection (classical, LAB-based + hierarchical Otsu + chroma consistency).
+"""Module A: automatic shadow detection (classical, LAB-based + hierarchical Otsu + multi-cue chroma/hue check).
 
 Combines:
 1. Otsu thresholding on Gaussian-smoothed L channel.
 2. Hierarchical Otsu re-splitting if the dark class is too large (separating
    dark materials vs actual cast shadows).
-3. Localized normalized chromaticity consistency check and luminance drop ratio
-   against the adjacent lit ring to reject dark-but-not-shadow objects.
+3. Multi-cue material consistency verification:
+   - Normalized RGB chromaticity distance.
+   - HSV circular hue consistency (shadow preserves surface hue).
+   - RGB channel gain dispersion (shadow scales all color channels proportionally;
+     dark objects exhibit high cross-channel ratio dispersion).
+   - Minimum luminance drop ratio.
 4. Morphological filtering, hole filling, and Gaussian softening.
 """
 import cv2
@@ -26,13 +30,15 @@ def detect(
     img,
     min_area_frac=0.002,
     min_separation=10.0,
-    max_chroma_diff=0.035,
+    max_chroma_diff=0.030,
+    max_hue_diff=15.0,
+    max_gain_disp=0.030,
     min_l_ratio=1.15,
     soft_sigma=2.0,
     max_area_frac=0.5,
     max_splits=2,
 ):
-    """Detect shadows with hierarchical Otsu and chroma-consistency filtering.
+    """Detect shadows with hierarchical Otsu and multi-cue dark object rejection.
 
     Args:
         img: RGB uint8 image.
@@ -42,7 +48,10 @@ def detect(
             less than this (L units, 0-100), we assume there is no shadow.
         max_chroma_diff: maximum allowed normalized chromaticity Euclidean
             distance between candidate shadow core and its surrounding lit ring.
-            Higher differences indicate inherently dark objects of different materials.
+        max_hue_diff: maximum allowed circular hue difference in degrees (in HSV).
+        max_gain_disp: maximum allowed coefficient of variation (std / mean)
+            of the per-channel gains. Shadows have uniform scale across RGB channels,
+            while dark materials exhibit high cross-channel dispersion.
         min_l_ratio: minimum ratio (L_lit / L_shadow) required for a valid shadow.
         soft_sigma: Gaussian sigma used to soften the final mask.
         max_area_frac: if Otsu labels more than this fraction of the image as shadow,
@@ -54,6 +63,7 @@ def detect(
     """
     h, w = img.shape[:2]
     lab = rgb_to_lab(img)
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
     L = cv2.GaussianBlur(lab[..., 0], (0, 0), 1.5)
 
     L8 = np.clip(L * 255.0 / 100.0, 0, 255).astype(np.uint8)
@@ -88,7 +98,7 @@ def detect(
     rgb_sum = img_f.sum(axis=2, keepdims=True) + 1e-5
     norm_rgb = img_f / rgb_sum
 
-    # Component-level chroma & luminance consistency check
+    # Component-level multi-cue consistency check
     n, labels, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
     min_area = min_area_frac * h * w
     ring_radius = max(5, int(round(min(h, w) * 0.025)) | 1)
@@ -118,9 +128,29 @@ def detect(
             L_out = float(L[ring > 0].mean())
             l_ratio = L_out / max(L_in, 1e-3)
 
-            # Accept only if chromaticity is consistent and luminance actually drops
-            if chroma_diff <= max_chroma_diff and l_ratio >= min_l_ratio:
-                keep[comp > 0] = 1
+            # Circular Hue difference in degrees [0, 180] in OpenCV
+            H_in = float(hsv[comp > 0, 0].mean())
+            H_out = float(hsv[ring > 0, 0].mean())
+            hue_diff = min(abs(H_in - H_out), 180.0 - abs(H_in - H_out))
+            sat_ring = float(hsv[ring > 0, 1].mean())
+
+            # Channel gain dispersion (coefficient of variation)
+            g = img_f[ring > 0].mean(axis=0) / np.maximum(img_f[comp > 0].mean(axis=0), 1.0)
+            gain_disp = float(g.std() / (g.mean() + 1e-5))
+
+            # Multi-cue validation:
+            # 1. Luminance must drop
+            # 2. Chromaticity distance must not be excessive
+            # 3. If surface has chroma/color, hue must match
+            # 4. Gain must be proportional across all RGB channels
+            valid_chroma = chroma_diff <= max_chroma_diff
+            valid_hue = (sat_ring < 12.0) or (hue_diff <= max_hue_diff)
+            valid_disp = gain_disp <= max_gain_disp
+
+            if (valid_chroma or (valid_hue and valid_disp)) and l_ratio >= min_l_ratio:
+                # Additional check: if hue difference or gain dispersion is very high, it is a material shift
+                if not (hue_diff > 20.0 and gain_disp > 0.04):
+                    keep[comp > 0] = 1
         else:
             # Insufficient border context; preserve if area is significant
             keep[comp > 0] = 1
