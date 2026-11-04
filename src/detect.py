@@ -1,9 +1,12 @@
-"""Module A: automatic shadow detection (classical, LAB-based + chroma consistency).
+"""Module A: automatic shadow detection (classical, LAB-based + hierarchical Otsu + chroma consistency).
 
-Idea: shadows are darker in the L channel but keep roughly the same
-chromaticity as the surface they fall on. We threshold L (Otsu), filter out
-dark objects using a chroma-consistency check against the adjacent lit surface,
-clean the mask with morphology, and return a soft mask.
+Combines:
+1. Otsu thresholding on Gaussian-smoothed L channel.
+2. Hierarchical Otsu re-splitting if the dark class is too large (separating
+   dark materials vs actual cast shadows).
+3. Localized normalized chromaticity consistency check and luminance drop ratio
+   against the adjacent lit ring to reject dark-but-not-shadow objects.
+4. Morphological filtering, hole filling, and Gaussian softening.
 """
 import cv2
 import numpy as np
@@ -26,8 +29,10 @@ def detect(
     max_chroma_diff=0.035,
     min_l_ratio=1.15,
     soft_sigma=2.0,
+    max_area_frac=0.5,
+    max_splits=2,
 ):
-    """Detect shadows with chroma-consistency filtering to reject dark objects.
+    """Detect shadows with hierarchical Otsu and chroma-consistency filtering.
 
     Args:
         img: RGB uint8 image.
@@ -40,6 +45,9 @@ def detect(
             Higher differences indicate inherently dark objects of different materials.
         min_l_ratio: minimum ratio (L_lit / L_shadow) required for a valid shadow.
         soft_sigma: Gaussian sigma used to soften the final mask.
+        max_area_frac: if Otsu labels more than this fraction of the image as shadow,
+            re-split inside the dark class (hierarchical Otsu).
+        max_splits: maximum number of hierarchical Otsu splits.
 
     Returns:
         float32 soft mask in [0, 1] (1 = shadow).
@@ -51,6 +59,16 @@ def detect(
     L8 = np.clip(L * 255.0 / 100.0, 0, 255).astype(np.uint8)
     _, binary = cv2.threshold(L8, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     shadow = binary > 0
+
+    # Hierarchical Otsu: if first split labels a huge area as shadow, it may be
+    # separating broad materials rather than lighting. Re-threshold inside dark class.
+    for _ in range(max_splits):
+        if shadow.mean() <= max_area_frac or shadow.sum() < 100:
+            break
+        t2, _ = cv2.threshold(
+            L8[shadow].reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+        )
+        shadow = shadow & (L8 <= t2)
 
     # No clear bimodality -> treat as shadow-free.
     if shadow.sum() == 0 or (~shadow).sum() == 0:
