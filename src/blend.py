@@ -2,10 +2,10 @@
 
 final = alpha * relit + (1 - alpha) * original
 
-alpha is derived from the soft shadow mask, snapped to image edges using a
-guided filter (He et al., ECCV 2010) with the grayscale input as guide. This
-ensures the illumination transition conforms tightly to actual scene contours,
-preventing halo and fringe artifacts at the boundary.
+alpha is derived from the soft shadow mask, smoothly centered on the boundary
+and snapped to image edges using a guided filter (He et al., ECCV 2010) with
+the grayscale input as guide. This ensures the illumination transition conforms
+tightly to actual scene contours, eliminating halo and fringe artifacts at the boundary.
 """
 import cv2
 import numpy as np
@@ -32,11 +32,8 @@ def blend(img, relit, mask, penumbra=None, use_guided=True, eps=1e-3):
 
     alpha = mask.astype(np.float32)
 
-    # Widen transition band slightly to encompass the full penumbra zone
-    k = 2 * penumbra + 1
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-    alpha_dilated = cv2.dilate(alpha, kernel)
-    alpha_blurred = cv2.GaussianBlur(alpha_dilated, (0, 0), penumbra)
+    # Smooth transition band centered directly on the physical shadow boundary
+    alpha_blurred = cv2.GaussianBlur(alpha, (0, 0), penumbra)
 
     if use_guided:
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
