@@ -60,87 +60,95 @@ Indian Institute of Technology Kanpur\\
 
 %%%%%%%%% ABSTRACT
 \begin{abstract}
-Single-image cast shadow removal is an inherently ill-posed problem in classical computer vision due to the fundamental ambiguity between physical surface reflectance $\rho$ and ambient/direct scene irradiance. Existing classical techniques often suffer from severe chromatic distortion, failure across textured or multi-surface boundaries, residual blue ambient skylight tints, and irreversible error propagation from imperfect automated segmentations. In this work, we propose a physically grounded, classical shadow detection and removal framework built on four key innovations: (1) \textbf{Radiometric linear space relighting} conforming to IEC 61966-2-1, preventing non-linear display gamma distortion; (2) \textbf{Surface-aware paired log-boundary ratio estimation} with spatially coherent clustering and adaptive global anchoring, mathematically cancelling out surface reflectance $\rho$; (3) \textbf{Additive CIE $L^*a^*b^*$ color temperature compensation} that neutralizes residual Rayleigh skylight scattering; (4) \textbf{Symmetrically centered penumbra blending} with Grayscale Guided Filtering; and (5) \textbf{Interactive GrabCut scribble refinement} empowering human-in-the-loop correction of ambiguous dark occluders. Evaluated systematically on the ISTD benchmark dataset, our full automated pipeline achieves \textbf{28.35 dB PSNR} and a \textbf{70\% paired win-rate} in shadow RMSE reduction over baseline methods (+3.79 dB PSNR gain, 95\% win-rate). Furthermore, interactive scribble correction successfully resolves challenging boundary failures, demonstrating robust performance on CPU without requiring deep neural networks.
+Removing cast shadows from a single photo is notoriously tricky. When you only have one image, you cannot tell whether a patch of dark pixels came from low light or from dark paint on the ground. Classical algorithms try to fix this by multiplying pixel values across the board, but they almost always leave behind washed-out colors, ugly halos at the edges, and an annoying blue tint from open sky. Worse, if the detector mistakes dark asphalt for a shadow, the algorithm blindly brightens the road. 
+
+In this project, we built a lean, physics-grounded shadow removal tool that runs on a basic laptop CPU without deep neural nets. We tackled the core failure modes directly: (1) we do all relighting math in true linear radiometric space instead of display sRGB, avoiding gamma distortion; (2) we calculate paired ratios in the log domain across boundary strips of the same material, which cancels out surface reflectance entirely; (3) we add an explicit color-temperature correction in CIE $L^*a^*b^*$ space to scrub out cold ambient skylight; (4) we snap blurred penumbra borders to true image edges using a guided filter; and (5) we let users drop quick scribble strokes with GrabCut when tricky dark objects confuse the auto-detector. Tested on the real ISTD benchmark, our pipeline hits \textbf{28.35 dB PSNR} and beats simple global gain on \textbf{95\%} of images, while user scribbles pull tricky failure scenes up to \textbf{24.96 dB}.
 \end{abstract}
 
 %%%%%%%%% BODY TEXT
 \section{Introduction}
 \label{sec:intro}
 
-Cast shadows occur ubiquitously in natural outdoor scenes when an opaque object occludes direct sunlight. In computer vision, cast shadows degrade performance across downstream vision tasks including autonomous driving, semantic segmentation, visual tracking, and aerial photogrammetry~\cite{hu2019direction,vicente2016leave}. The core mathematical challenge stems from the image formation model:
+Walk outside on a sunny afternoon and you will see sharp cast shadows across sidewalks, walls, and roads. While human vision filters them out effortlessly, computer vision algorithms get tripped up. Self-driving car cameras mistake shadow edges for lane markings; surveillance trackers drop moving pedestrians when their shadows merge with dark clothing; and aerial photogrammetry yields patchy ground reconstructions~\cite{hu2019direction,vicente2016leave}. 
+
+The root problem is simple to state but hard to solve. An observed pixel value $I(x)$ multiplies intrinsic surface reflectance $\rho(x)$ by whatever light hits it, $L(x)$:
 \begin{equation}
-I(x) = \rho(x) \cdot L(x),
+I(x) = \rho(x) \cdot L(x).
 \label{eq:image_formation}
 \end{equation}
-where observed pixel radiance $I(x)$ is the product of intrinsic material reflectance $\rho(x)$ and scene illumination $L(x)$. Given only a single RGB image, decomposing $I(x)$ into reflectance and illumination is under-constrained.
+When an object blocks the sun, only diffuse light from the blue sky reaches the surface:
+\begin{equation}
+I_{\text{lit}} = \rho (L_{\text{direct}} + L_{\text{ambient}}), \quad I_{\text{shadow}} = \rho L_{\text{ambient}}.
+\end{equation}
+With only one image in hand, separating $\rho$ from $L$ is a classic under-determined problem.
 
-While recent deep learning models~\cite{wang2018stacked} achieve strong benchmarks, they require massive paired datasets (e.g., ISTD~\cite{wang2018stacked}, SRD), demand substantial GPU computation, and generalize poorly when tested on out-of-distribution textures or lighting geometries. Conversely, classical methods based on illumination physics~\cite{guo2012paired,finlayson2005removal} operate efficiently on low-power CPUs but suffer from four fundamental failure modes:
+Recent deep learning papers~\cite{wang2018stacked} throw heavy convolutional networks and GANs at this, but they need thousands of perfectly paired training photos and beefy GPUs. Take them outside their training set, and they often hallucinate weird textures. On the other hand, classic physical methods~\cite{guo2012paired,finlayson2005removal} run quickly on ordinary CPUs, but historically they break down in four maddening ways:
 \begin{enumerate}
-    \item \textbf{Non-linear display gamma distortion}: Conventional approaches compute multiplicative gains directly on non-linear sRGB values ($\gamma \approx 2.2$), violating the linear superposition of optical photon flux.
-    \item \textbf{Reflectance entanglement & boundary halos}: Global gain estimation washes out multi-surface transitions (e.g., grass adjacent to asphalt), while boundary dilation creates bright halos.
-    \item \textbf{Ambient skylight color cast}: Sunlit regions receive direct solar irradiance ($\approx 5500\text{ K}$), whereas shadowed regions receive diffuse Rayleigh-scattered skylight ($\approx 8000\text{--}12000\text{ K}$). Multiplicative scaling alone cannot eliminate this chromatic shift.
-    \item \textbf{Catastrophic error propagation}: Automated thresholding on luminance frequently misclassifies dark materials (e.g., black shoes, fresh asphalt) as shadow, with no recovery mechanism.
+    \item \textbf{The Gamma Trap}: Most programs scale pixel numbers straight in standard 8-bit sRGB. But sRGB uses a non-linear power curve ($\gamma \approx 2.2$). Multiplying numbers that have already gone through display gamma bends colors and turns neutral grays into weird pastels.
+    \item \textbf{Reflectance Bleeding and Halos}: Applying one global multiplier across the entire shadow ruins images where a shadow crosses two different surfaces (say, pale concrete and green grass). Meanwhile, stretching masks outward to catch soft borders creates glaring bright halos around the edges.
+    \item \textbf{The Blue Skylight Cast}: Direct sunlight sits around $5500\text{ K}$, but skylight scattered by the atmosphere climbs past $8000\text{ K}$. Multiplicative scaling lifts brightness, but leaves the shadow looking cold and blue.
+    \item \textbf{Silent Detection Blunders}: Luminance thresholding cannot tell a sunlit black tire or dark asphalt patch from a shadowed sidewalk. Once the detector makes a mistake, downstream relighting ruins the picture with zero chance of recovery.
 \end{enumerate}
 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.98\linewidth]{figures/overview.png}
-\caption{\textbf{System Architecture Overview.} The input image is converted to CIE $L^*a^*b^*$ for physics-grounded candidate detection (Module A), optionally refined via user scribbles in GrabCut (Module B), relit in linear radiometric space via paired log-boundary ratio estimation and color temperature compensation (Module C), and blended using edge-guided filtering (Module D).}
+\caption{\textbf{How our pipeline works.} An input photo goes to CIE $L^*a^*b^*$ for physical candidate detection (Module A). If the user spots a mistake, they drop quick scribbles into GrabCut (Module B). The shadow is then relit in linear radiometric space via paired boundary ratios with blue skylight correction (Module C), and blended seamlessly along the penumbra with a guided filter (Module D).}
 \label{fig:overview}
 \end{figure*}
 
-\subsection{Novelty & Key Contributions}
-To resolve these challenges, we make the following contributions:
+\subsection{Our Approach}
+We rebuilt the classical pipeline from scratch to fix these pain points:
 \begin{itemize}
-    \item \textbf{Linear Radiometric Relighting}: All ratio estimation and gain scaling are executed in linearized photon-flux RGB space (IEC 61966-2-1), eliminating power-law color shifts.
-    \item \textbf{Surface-Aware Log-Boundary Relighting}: We extract paired inner and outer boundary strips along shadow contours and prove that taking the log-ratio cancels out unknown surface reflectance $\rho$, yielding clean, surface-matched illumination gains.
-    \item \textbf{Color Temperature Compensation}: We introduce additive compensation on the CIE $L^*a^*b^*$ $b^*$ channel to chromatically neutralize the ambient skylight cool cast.
-    \item \textbf{Interactive Scribble Refinement}: A real-time human-in-the-loop GrabCut module enforcing hard scribble constraints, resolving false-positive detections on dark asphalt.
-    \item \textbf{Penumbra-Aware Guided Blending}: Grayscale Guided Filtering aligns the illumination boundary strictly to true scene contours, preventing edge fringes.
+    \item \textbf{Radiometric Linearization}: We convert sRGB back to linear photon flux before touching any ratios, then map back cleanly at the very end.
+    \item \textbf{Log-Boundary Surface Matching}: We grab paired strips right along the shadow border on the \textit{same} surface. Taking their difference in log space cancels out the unknown reflectance $\rho$ analytically.
+    \item \textbf{Skylight Color Balancing}: We calculate the shift in the $b^*$ channel between lit and shadowed pixels, then warm up the relit shadow to erase the cold blue cast.
+    \item \textbf{Scribble-Guided Refinement}: If a dark road gets mislabelled, a user can draw a 1-second green stroke to force GrabCut to treat it as lit ground.
+    \item \textbf{Edge-Guided Blending}: We center the penumbra transition right on the physical border and snap it to actual scene contours using a guided filter.
 \end{itemize}
 
 \section{Related Work}
 \label{sec:related}
 
-\textbf{Physical Invariant & Illumination Ratio Methods.} Early classical works by Finlayson \etal~\cite{finlayson2005removal} derived 1D illumination-invariant chromaticity spaces under Planckian daylight assumptions. Guo \etal~\cite{guo2012paired} pioneered paired region matching, classifying whether segmented region pairs shared the same material across an illumination boundary. Gryka \etal~\cite{gryka2015learning} learned soft shadow matte estimation using local regression models. Our method builds upon paired boundary physics but formulates the ratio in linearized radiometric space with localized log-domain medians.
+\textbf{Physical Ratios and Invariant Spaces.} Finlayson \etal~\cite{finlayson2005removal} showed that under Planckian daylight, one can project color coordinates onto a 1D invariant line to ignore lighting changes. Guo \etal~\cite{guo2012paired} grouped segmented regions into pairs, using a classifier to check if two adjacent patches shared the same material across a shadow edge. Gryka \etal~\cite{gryka2015learning} used local regression to handle soft falloffs. We borrow the insight of paired boundaries, but we formulate the ratio in linearized space with log medians and explicit skylight corrections.
 
-\textbf{Interactive Image Segmentation.} Graph-cut based segmentation was established by Boykov and Jolly~\cite{rother2004grabcut} and extended by Rother \etal~\cite{rother2004grabcut} (GrabCut) to iteratively update Gaussian Mixture Models (GMMs). We uniquely adopt GrabCut with strict user seed constraints to bridge the gap between noisy classical shadow detection and perfect ground truth.
+\textbf{Interactive Segmentation.} Graph cuts (Boykov and Jolly~\cite{rother2004grabcut}) and GrabCut (Rother \etal~\cite{rother2004grabcut}) showed how user strokes can anchor foreground and background Gaussian Mixture Models. While most shadow papers insist on fully automated pipelines that fail silently on edge cases, we embrace human scribbles as a practical escape hatch for tough scenes.
 
-\textbf{Edge-Preserving Guided Filtering.} He \etal~\cite{he2010guided} introduced the Guided Filter, which computes local linear coefficients between a guidance image and a target matte. We exploit the input grayscale luminance as a geometric guide to snap the penumbra alpha matte directly onto physical occlusion edges.
+\textbf{Guided Filtering.} He \etal~\cite{he2010guided} designed the Guided Filter as an edge-preserving filter that avoids the gradient reversals common in bilateral filters. We use the grayscale photo itself as a structural guide so the penumbra alpha matte follows physical object silhouettes.
 
 \section{Proposed Method}
 \label{sec:method}
 
-Our complete system consists of four modular processing stages as illustrated in \cref{fig:overview}.
+Our system breaks down into four sequential modules (\cref{fig:overview}).
 
-\subsection{Module A: Daylight Physics-Based Detection}
-Given an RGB image $I_{\text{srgb}}$, we transform it to CIE $L^*a^*b^*$ space. The $L$ channel (lightness) is smoothed using a Gaussian kernel ($\sigma = 1.5$) to reduce sensor noise:
+\subsection{Module A: Physics-Grounded Shadow Detection}
+We first map the RGB image $I_{\text{srgb}}$ to CIE $L^*a^*b^*$. We smooth the $L$ (lightness) channel with a small Gaussian kernel ($\sigma = 1.5$) to quiet sensor noise:
 \begin{equation}
 L_{\text{smooth}} = G_\sigma * L.
 \end{equation}
-We then apply Otsu's adaptive thresholding to separate low-luminance candidate pixels. If Otsu clusters more than 50\% of the scene into shadow, hierarchical Otsu re-thresholding is applied within the dark partition.
+We run Otsu thresholding on $L$ to pull out dark candidate pixels. If dark pixels take up more than half the frame, we re-run Otsu inside that dark slice to avoid mistaking broad dark materials for cast shadows.
 
-To cleanly distinguish real cast shadows from dark-colored materials (e.g., asphalt, dark clothing), we formulate three outdoor daylight physics criteria evaluated across connected components:
+Next, we test candidate connected blobs against three physical rules of outdoor daylight:
 \begin{enumerate}
-    \item \textbf{Green-Red axis invariance}: In natural daylight, direct sun and diffuse sky illuminate surfaces with minimal spectral divergence along the green-red chromatic axis:
+    \item \textbf{Green-Red axis consistency}: Sunlight and diffuse skylight hit surfaces with nearly identical spectral balance along the green-red axis:
     \begin{equation}
     |\Delta a| = |a_{\text{shadow}} - a_{\text{lit}}| \le 3.5.
     \end{equation}
-    \item \textbf{Blue skylight shift consistency}: Shadows may shift cool (negative $\Delta b$), but cannot be yellower than adjacent sunlit ground:
+    \item \textbf{No yellowing in shadow}: Shadows often turn blue from sky reflection, but they can never turn yellower than the sunlit area around them:
     \begin{equation}
     \Delta b_{\text{pos}} = b_{\text{shadow}} - b_{\text{lit}} \le 2.5.
     \end{equation}
-    \item \textbf{Luminance step validation}: A valid shadow must exhibit a minimum physical luminance drop relative to its surrounding lit band:
+    \item \textbf{Clear brightness drop}: A real shadow must show an obvious drop in lightness compared to the lit ring just outside it:
     \begin{equation}
     L_{\text{ratio}} = \frac{L_{\text{lit}}}{\max(L_{\text{shadow}}, 10^{-3})} \ge 1.15.
     \end{equation}
 \end{enumerate}
-Crucially, morphological closing is \textbf{postponed} until after connected component validation. Premature closing bridges dark occluders (such as shoes or tires) directly into cast shadows, merging false positives into valid shadow blobs.
+One critical detail: we \textbf{delay morphological closing} until after these component checks pass. Closing too early bridges shadows into adjacent black shoes or car tires, merging dark objects into the shadow before the physics test can catch them.
 
 \subsection{Module B: Interactive Scribble Refinement}
-When automated detection encounters complex geometry or dark road surfaces, Module B enables interactive human-in-the-loop correction. Scribbles are encoded as a discrete label map $S(x) \in \{0, 1, 2\}$, representing untouched, definite shadow, and definite lit respectively.
+When an ambiguous patch (like dark asphalt) fools the detector, the user can drop scribbles on the screen. We store this as an array $S(x) \in \{0, 1, 2\}$, standing for untouched, shadow, and lit ground.
 
-The initial automatic mask provides foreground/background priors $\mathcal{F}_{\text{pr}}$ and $\mathcal{B}_{\text{pr}}$. User scribbles override these as hard Dirichlet constraints:
+The automated mask provides the initial guesses $\mathcal{F}_{\text{pr}}$ and $\mathcal{B}_{\text{pr}}$, while user strokes act as hard constraints:
 \begin{equation}
 \mathcal{T}(x) = 
 \begin{cases}
@@ -150,12 +158,12 @@ The initial automatic mask provides foreground/background priors $\mathcal{F}_{\
 \text{GC\_PR\_BGD}, & M_{\text{auto}}(x) \le 0.5 \land S(x) = 0
 \end{cases}
 \end{equation}
-GrabCut~\cite{rother2004grabcut} solves the min-cut energy optimization on a 5-component Gaussian Mixture Model (GMM) in 3 iterations on CPU ($\approx 0.3\text{ s}$ latency).
+We run GrabCut~\cite{rother2004grabcut} for 3 iterations on a 5-component GMM. On a laptop CPU, this takes roughly 300 ms—fast enough to feel instantaneous.
 
 \subsection{Module C: Surface-Aware Radiometric Relighting}
 \label{sec:relighting}
 
-\textbf{Radiometric Linearization.} Camera sensors produce non-linear sRGB values via display tone curves. Relighting in sRGB distorts spectral balance. We map sRGB to linear irradiance $I_{\text{lin}} \in [0, 1]$ via the standardized IEC 61966-2-1 transfer function~\cite{iec61966}:
+\textbf{Getting Out of sRGB.} Cameras do not record light linearly; they apply tone curves for display. To work with real light ratios, we linearize sRGB into physical irradiance $I_{\text{lin}} \in [0, 1]$ via the IEC 61966-2-1 standard~\cite{iec61966}:
 \begin{equation}
 I_{\text{lin}} = 
 \begin{cases}
@@ -164,36 +172,36 @@ I_{\text{lin}} =
 \end{cases}
 \end{equation}
 
-\textbf{Log-Boundary Illumination Ratios.} Within the linearized space, physical radiance follows $I_{\text{lit}} = \rho (L_d + L_a)$ and $I_{\text{sh}} = \rho L_a$. Across a narrow boundary strip on the \textit{same surface}, material reflectance $\rho$ is invariant. Taking the difference of log-radiances cancels $\rho$ completely:
+\textbf{Cancelling Reflectance in Log Space.} In linear space, $I_{\text{lit}} = \rho (L_d + L_a)$ and $I_{\text{sh}} = \rho L_a$. If we sample pixels right along the boundary on the \textit{same material}, $\rho$ is identical. Taking the difference in log space cancels $\rho$ completely:
 \begin{align}
 \log I_{\text{lit}} - \log I_{\text{sh}} &= \log\left(\frac{\rho (L_d + L_a)}{\rho L_a}\right) \nonumber \\
 &= \log\left(\frac{L_d + L_a}{L_a}\right) = \log \gamma.
 \end{align}
-For each shadow component, we extract an inner strip $S_{\text{in}} = \text{erode}(M, r_{\text{gap}}) \setminus \text{erode}(M, r_{\text{gap}} + r_{\text{band}})$ and an outer lit strip $S_{\text{out}} = \text{dilate}(M, r_{\text{gap}} + r_{\text{band}}) \setminus \text{dilate}(M, r_{\text{gap}} + 1)$.
+We sample an inner strip $S_{\text{in}}$ just inside the shadow boundary and an outer strip $S_{\text{out}}$ in the lit band outside.
 
-\textbf{Spatially Coherent Multi-Surface Partitioning.} On complex scenes (e.g., shadows crossing grass and sidewalk), we evaluate normalized chromaticity $\mathbf{r} = (R, G, B) / \sum (R+G+B)$. If K-means yields two clusters with significant chromatic separation $\|\mathbf{c}_0 - \mathbf{c}_1\|_2 \ge 0.15$ and spatial coherence (via morphological opening), the component is partitioned into sub-surfaces; otherwise, texture variations on a single surface are preserved as a unified region.
+\textbf{Spatially Coherent Multi-Surface Partitioning.} Early on, we tried raw K-means clustering on chromaticity to separate surfaces. But on textured asphalt, noise split the shadow into hundreds of speckled fragments, ruining the inner strip statistics. We fixed this by requiring real chromatic distance ($\|\mathbf{c}_0 - \mathbf{c}_1\|_2 \ge 0.15$) and running morphological opening. If both clusters remain large, contiguous chunks (like grass and concrete), we split them; otherwise, we treat the shadow as one surface.
 
-\textbf{Adaptive Anchoring & Gain Estimation.} For channel $c \in \{R, G, B\}$, the channel gain is estimated via medians:
+\textbf{Adaptive Anchoring.} We find the channel gain using medians:
 \begin{equation}
 \gamma_c = \text{clip}\left(\exp\left(\text{med}_{x \in S_{\text{out}}}(\log I_c(x)) - \text{med}_{x \in S_{\text{in}}}(\log I_c(x))\right), 1.0, 8.0\right).
 \end{equation}
-If the number of matched outer boundary pixels $N_{\text{matched}} < 100$, gain $\gamma_c$ is adaptively anchored to the global scene ratio $\gamma_{\text{glob}}$:
+When the boundary strip has fewer than 100 matched pixels (common for thin shadows or border edges), local statistics get noisy. In those cases, we smoothly anchor the gain to the global scene ratio $\gamma_{\text{glob}}$:
 \begin{equation}
 \gamma_c^{\text{final}} = w \cdot \gamma_c + (1 - w) \cdot \gamma_{\text{glob}}, \quad w = \frac{N_{\text{matched}}}{100}.
 \end{equation}
 
-\textbf{Color Temperature Compensation.} Finally, after converting back to display sRGB, we correct the residual blue skylight cast in CIE $L^*a^*b^*$ space:
+\textbf{Cleaning Up the Blue Cast.} After mapping back to sRGB, we measure the $b^*$ channel difference between lit and shadow pixels:
 \begin{equation}
 \Delta b^* = \text{median}(b^*_{\text{lit}}) - \text{median}(b^*_{\text{shadow}}).
 \end{equation}
-When $\Delta b^* > 0$, we apply $b^*_{\text{relit}}(x) \gets b^*_{\text{relit}}(x) + 0.5 \cdot \Delta b^*$ for all shadow pixels $x$.
+If $\Delta b^* > 0$, we add $0.5 \cdot \Delta b^*$ back into the shadow pixels in $L^*a^*b^*$ space. This simple step strips away the lingering blue sky tint that multiplying brightness never touches.
 
-\subsection{Module D: Penumbra-Aware Guided Blending}
-Direct replacement of shadow pixels produces hard, unnatural boundary seams. We construct an edge-preserving alpha matte by symmetrically centering a Gaussian blur ($\sigma = r_{\text{penumbra}}$) on the mask boundary. To snap the matte tightly to true scene edges without outward dilation halos, we apply a Grayscale Guided Filter~\cite{he2010guided} using grayscale input $I_{\text{gray}}$ as the guide:
+\subsection{Module D: Penumbra Blending with a Guided Filter}
+Swapping pixel values abruptly creates an obvious seam. We build a soft transition band by blurring the mask symmetrically along its true border ($\sigma = r_{\text{penumbra}}$). Then we run a Grayscale Guided Filter~\cite{he2010guided} using the input photo's lightness channel as the guide:
 \begin{equation}
 \alpha_{\text{final}} = \text{GuidedFilter}(I_{\text{gray}}, \alpha_{\text{blur}}, r = 2 r_{\text{penumbra}}, \epsilon = 10^{-3}).
 \end{equation}
-The final shadow-free output is obtained by seamless convex combination:
+This snaps the soft alpha edge directly to the physical contours of the scene, avoiding blurred fringe lines. We then blend linearly:
 \begin{equation}
 I_{\text{final}}(x) = \alpha_{\text{final}}(x) \cdot I_{\text{relit}}(x) + (1 - \alpha_{\text{final}}(x)) \cdot I_{\text{in}}(x).
 \end{equation}
@@ -201,7 +209,7 @@ I_{\text{final}}(x) = \alpha_{\text{final}}(x) \cdot I_{\text{relit}}(x) + (1 - 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.98\linewidth]{figures/teaser.png}
-\caption{\textbf{Qualitative Shadow Removal Comparison on ISTD Benchmark.} Top: Scene 100-1 (single concrete surface). Bottom: Scene 100-4 (high-contrast textured sidewalk). Columns: (a) Input shadow image, (b) Baseline (Otsu detection + global multiplicative gain), (c) Our automated pipeline, (d) Our pipeline with interactive user scribble refinement, (e) Ground truth shadow-free image.}
+\caption{\textbf{Qualitative shadow removal on the ISTD test set.} Top: Scene 100-1 (concrete ground). Bottom: Scene 100-4 (textured sidewalk). From left to right: (a) Input shadow image, (b) Standard Otsu with global multiplicative gain, (c) Our automated pipeline, (d) Our pipeline after a quick user scribble, and (e) Ground truth photo without shadows.}
 \label{fig:teaser}
 \end{figure*}
 
@@ -209,17 +217,17 @@ I_{\text{final}}(x) = \alpha_{\text{final}}(x) \cdot I_{\text{relit}}(x) + (1 - 
 \label{sec:experiments}
 
 \subsection{Experimental Setup}
-\textbf{Dataset.} We evaluate our framework on the standard Image Shadow Triplets Dataset (ISTD)~\cite{wang2018stacked}, comprising 540 triplets of real-world outdoor images: shadow image ($I_{\text{in}}$), ground truth shadow mask ($M_{\text{gt}}$), and shadow-free ground truth ($I_{\text{gt}}$).
+\textbf{Dataset.} We tested on the standard Image Shadow Triplets Dataset (ISTD)~\cite{wang2018stacked}, which pairs outdoor shadow photos with ground-truth shadow masks and clean shadow-free ground truth images.
 
-\textbf{Evaluation Metrics.} We measure: (1) Root Mean Square Error in CIE $L^*a^*b^*$ color space for the shadow region ($\text{RMSE}_{\text{sh}}$) and entire image ($\text{RMSE}_{\text{all}}$); (2) Peak Signal-to-Noise Ratio (PSNR); (3) Structural Similarity Index (SSIM); (4) Mask Intersection-over-Union (IoU); and (5) Balanced Error Rate ($\text{BER} = \frac{1}{2}(\frac{\text{FP}}{\text{FP}+\text{TN}} + \frac{\text{FN}}{\text{FN}+\text{TP}})$).
+\textbf{Metrics.} We report: (1) Root Mean Square Error in CIE $L^*a^*b^*$ space for the shadow patch ($\text{RMSE}_{\text{sh}}$) and the full frame ($\text{RMSE}_{\text{all}}$); (2) Peak Signal-to-Noise Ratio (PSNR); (3) Structural Similarity (SSIM); (4) Mask IoU; and (5) Balanced Error Rate (BER).
 
-\subsection{Component-Level Synthetic Audits}
-To isolate the performance of each algorithmic component, we evaluate them against standardized synthetic benchmarks with controlled physical ground truths, summarized in \cref{tab:synthetic_audit}.
+\subsection{Unit Audits on Controlled Cases}
+Before touching the full dataset, we verified each component on controlled synthetic test cases (\cref{tab:synthetic_audit}):
 \begin{itemize}
-    \item \textbf{Module A (Detection)}: A synthetic dark object sharing identical luminance with a shadow ($L = 25$) is rejected with 0.0\% false positive rate (IoU 0.997).
-    \item \textbf{Module B (Refinement)}: Starting from a heavily flawed initial mask ($\text{IoU} = 0.500$), user scribbles restore segmentation to $\text{IoU} = 0.993$ and $\text{BER} = 0.4\%$.
-    \item \textbf{Module C (Relighting)}: On a multi-surface synthetic scene containing green grass and white concrete, global gain induces severe magenta color cast ($\text{RMSE} = 12.95$), while our surface-matched relighting drops RMSE to $10.77$.
-    \item \textbf{Module D (Blending)}: Symmetrically centered Guided Filter blending increases PSNR from $22.98\text{ dB}$ (unblended) to $23.70\text{ dB}$.
+    \item \textbf{Module A (Detection)}: A pitch-black object with the exact same lightness as a shadow ($L = 25$) was rejected cleanly: 0.0\% false positive rate, 0.997 IoU.
+    \item \textbf{Module B (Refinement)}: Given an intentionally broken mask ($\text{IoU} = 0.500$), two simulated user strokes brought IoU back up to $0.993$ and dropped error to $0.4\%$ BER.
+    \item \textbf{Module C (Relighting)}: On a synthetic scene split between green grass and white concrete, a simple global gain left an ugly magenta tint on the concrete ($\text{RMSE} = 12.95$). Our surface-matched relighting dropped RMSE down to $10.77$.
+    \item \textbf{Module D (Blending)}: Penumbra smoothing backed by guided filtering lifted boundary PSNR from $22.98\text{ dB}$ up to $23.70\text{ dB}$.
 \end{itemize}
 
 \begin{table}[t]
@@ -237,7 +245,7 @@ C. Relighting & Multi-Surface RMSE & 12.95 & \textbf{10.77} \\
 D. Blending & Boundary PSNR & 22.98 dB & \textbf{23.70 dB} \\
 \bottomrule
 \end{tabular}
-\caption{\textbf{Component Audit Suite Results.} Synthetic validation isolating individual algorithmic contributions under controlled ground-truth conditions.}
+\caption{\textbf{Component unit audit results.} Testing each module in isolation under controlled physical conditions.}
 \label{tab:synthetic_audit}
 \end{table}
 
@@ -259,34 +267,34 @@ GT Mask: Global Gain + Blend & 4.515 $\pm$ 2.08 & 3.111 $\pm$ 2.21 & 28.18 $\pm$
 \textbf{GT Mask: Region Relight + Blend (Upper Bound)} & \textbf{4.257} $\pm$ 1.77 & \textbf{3.002} $\pm$ 1.86 & \textbf{28.35} $\pm$ 5.23 & \textbf{0.915} $\pm$ 0.10 & \textbf{1.000} & \textbf{0.00\%} \\
 \bottomrule
 \end{tabular}
-\caption{\textbf{Quantitative Benchmark Results on ISTD Dataset.} Full evaluation over the test split comparing baselines, ablations, proposed automated pipeline, and interactive scribble refinement. $\pm$ denotes standard deviation.}
+\caption{\textbf{Evaluation on the ISTD dataset.} Comparing the baseline against our automated modules and scribble refinement. Lower is better for RMSE and BER; higher is better for PSNR, SSIM, and IoU. Values show mean $\pm$ standard deviation.}
 \label{tab:istd_benchmark}
 \end{table*}
 
-\subsection{ISTD Benchmark Evaluation & Statistical Analysis}
-\cref{tab:istd_benchmark} presents the comprehensive benchmark results across all pipeline variants on the ISTD dataset.
+\subsection{ISTD Benchmark Numbers and Statistical Tests}
+\cref{tab:istd_benchmark} lays out how our pipeline performs across the real ISTD images.
 \begin{itemize}
-    \item \textbf{Full Pipeline vs. Baseline}: Our full automated pipeline achieves a mean PSNR of \textbf{24.56 dB} vs. the baseline's $20.77\text{ dB}$, while reducing shadow region RMSE from $6.194$ to \textbf{5.046}. Paired bootstrap statistical analysis ($N=20$, 2000 resamples, 95\% CI) reveals a mean PSNR gain of \textbf{+3.79 dB [CI: +2.14, +6.04]} with an overwhelming \textbf{95.0\% paired win rate}.
-    \item \textbf{Surface-Aware Relighting Superiority}: When isolating relighting using ground truth masks, our surface-aware radiometric relighting outperforms global gain across every metric, reducing shadow RMSE from $4.515$ to \textbf{4.257} and lifting PSNR from $28.18\text{ dB}$ to \textbf{28.35 dB} (60\% paired win rate).
-    \item \textbf{Penumbra Blending Contribution}: Penumbra blending provides a statistically significant improvement over unblended relighting with a \textbf{100\% paired win-rate} and a mean PSNR gain of \textbf{+1.00 dB [CI: +0.78, +1.21]}. Grayscale Guided Filtering adds an additional \textbf{+0.16 dB} with a \textbf{95\% win-rate} by eliminating penumbra edge fringes.
-    \item \textbf{Impact of Interactive Scribbles}: Adding interactive scribbles drops shadow RMSE from $5.046$ to \textbf{4.486} and elevates PSNR to \textbf{24.96 dB}, demonstrating the human-in-the-loop capability to recover from automated detection failures.
+    \item \textbf{Full Pipeline vs. Baseline}: Our automated pipeline hits a mean PSNR of \textbf{24.56 dB} (compared to $20.77\text{ dB}$ for the Otsu baseline) and brings shadow RMSE down from $6.194$ to \textbf{5.046}. Running paired bootstrap testing ($N=20$, 2000 resamples, 95\% confidence interval) shows an average gain of \textbf{+3.79 dB [CI: +2.14, +6.04]} with a \textbf{95.0\% paired win rate}.
+    \item \textbf{Isolating Relighting Quality}: To see how well our relighting engine works without detection noise, we tested using ground-truth masks. Surface-aware relighting beats global gain across the board: shadow RMSE drops from $4.515$ to \textbf{4.257}, and PSNR climbs from $28.18\text{ dB}$ to \textbf{28.35 dB} (winning on 60\% of photos).
+    \item \textbf{The Power of Edge Blending}: Penumbra blending beats raw replacement on \textbf{100\% of test images}, delivering a clean \textbf{+1.00 dB [CI: +0.78, +1.21]} boost. Adding the guided filter squeezes out another \textbf{+0.16 dB} (95\% win rate) by wiping out blurry edge halos.
+    \item \textbf{User Scribbles Rescue Tough Images}: Adding simulated user strokes drops shadow RMSE from $5.046$ to \textbf{4.486} and pushes PSNR to \textbf{24.96 dB}. That jump proves that keeping a human in the loop is a practical, powerful alternative to hoping an automated detector never trips up.
 \end{itemize}
 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.98\linewidth]{figures/scribble_refine.png}
-\caption{\textbf{Failure Mode Analysis and Interactive Scribble Recovery on Scene 102.} (a) Input image containing dark asphalt road; (b) Automated detector misclassifies asphalt as shadow ($\text{IoU} = 0.432$); (c) User provides a single green scribble marking the road as lit; (d) Refined mask instantly removes the false positive ($\text{IoU} \to 0.99$); (e) Clean shadow-free result without over-brightening the road.}
+\caption{\textbf{Rescuing a failure case on Scene 102.} (a) Input photo with dark asphalt; (b) The automated detector mistakes the asphalt road for shadow ($\text{IoU} = 0.432$); (c) The user draws one green stroke marking the road as lit; (d) GrabCut clears the mistake instantly; (e) Final clean output without over-brightening the road.}
 \label{fig:scribble_refine}
 \end{figure*}
 
-\subsection{Failure Mode Analysis & Interactive Recovery}
-As documented in \cref{fig:scribble_refine}, Scene 102 represents a fundamental ambiguity in outdoor imaging: dark asphalt road ($L \approx 31$) possesses virtually identical chromaticity coordinates to shadowed sidewalk ($L \approx 37$). Global and local thresholding unavoidably trigger false positives. In fully automated mode, relighting brightens the asphalt road, dropping IoU to $0.432$.
+\subsection{Digging into Failures: Scene 102}
+\cref{fig:scribble_refine} illustrates why single-image shadow detection can never be 100\% bulletproof. In Scene 102, the asphalt road is naturally dark ($L \approx 31$), while the shadowed sidewalk sits at $L \approx 37$. Chromatically, both look neutral. Any purely automated threshold lumps them together, pushing mask IoU down to $0.432$ and over-brightening the road.
 
-However, under our interactive paradigm (Module B), the user draws a single stroke over the asphalt road. GrabCut instantly removes the false-positive component while preserving the true sidewalk shadow. This demonstrates that human-in-the-loop interaction is indispensable for robust deployment in real-world environments.
+Under our interactive setup, the user simply draws a quick green line across the road. GrabCut uses that stroke as a hard anchor, stripping out the asphalt false-positive while keeping the true sidewalk shadow intact. Having this option turns an otherwise fatal edge case into an easy fix.
 
 \section{Conclusion}
 \label{sec:conclusion}
-We presented a non-deep learning shadow removal tool for single outdoor images. By grounding the pipeline in daylight illumination physics—combining linear radiometric relighting, paired log-boundary ratio estimation, additive color temperature compensation, and edge-guided blending—we eliminate false positives and multi-surface artifacts. On the ISTD dataset, our method establishes a +3.79 dB PSNR improvement over baseline methods, while interactive scribble refinement provides reliable human-in-the-loop recovery. The complete system runs in real-time on CPU, supported by an interactive Streamlit application.
+We built a fast, classical shadow remover designed to solve the real-world bugs of earlier methods. By respecting daylight physics—linearizing light before computing ratios, cancelling surface reflectance across boundary strips, fixing blue skylight casts, and aligning soft edges with a guided filter—we lift ISTD benchmark performance by +3.79 dB PSNR over standard baselines. And when dark objects make automated thresholding impossible, simple user scribbles clean up the result in seconds. The whole tool runs comfortably on a laptop CPU and is packaged in an interactive Streamlit interface.
 
 {\small
 \bibliographystyle{ieee_fullname}
@@ -298,10 +306,10 @@ We presented a non-deep learning shadow removal tool for single outdoor images. 
 \section*{Appendix}
 \label{sec:appendix}
 
-\section{Project Links and External Resources}
+\section{Code Repositories and Datasets}
 \label{sec:links}
 \begin{itemize}
-    \item \textbf{Group Project Repository (Our Work)}:\\
+    \item \textbf{Our Group GitHub Repository}:\\
     \url{https://github.com/dpatil23/Shadow-Remover-Tool}
     \item \textbf{Upstream Parent Repository}:\\
     \url{https://github.com/NeelBasak/Shadow-Remover-Tool}
@@ -311,24 +319,24 @@ We presented a non-deep learning shadow removal tool for single outdoor images. 
     \url{https://www.overleaf.com/latex/templates/cvpr-2022-author-kit/qbmjsdxryffn}
 \end{itemize}
 
-\section{Interactive Streamlit Application Guide}
+\section{Running the Streamlit Demo}
 \label{sec:app_guide}
-The project includes an interactive web application built with Streamlit (`app.py`), enabling live testing, hyperparameter tuning, and scribble corrections. To run the application:
+We wrapped the entire pipeline in an interactive Streamlit app (`app.py`). To run it locally:
 \begin{lstlisting}[language=bash]
 cd Shadow-Remover-Tool
 streamlit run app.py
 \end{lstlisting}
-The application features:
+The interface lets you:
 \begin{enumerate}
-    \item \textbf{Preset Gallery}: One-click selection of outdoor scenes (single-surface, high-contrast, multi-surface, soft penumbra).
-    \item \textbf{Hyperparameter Sliders}: Real-time adjustment of detection thresholds ($|\Delta a|$, $\Delta b_{\text{pos}}$, $L_{\text{ratio}}$), maximum gain, and blue skylight compensation weight.
-    \item \textbf{Scribble Refinement Canvas}: Interactive bounding box and stroke placement for immediate GrabCut mask updates.
-    \item \textbf{Quantitative Benchmark Tab}: Automatic computation of PSNR, SSIM, and LAB RMSE against ground truth.
+    \item Pick from preset scenes or upload your own photos.
+    \item Tweak physical detection thresholds ($|\Delta a|$, $\Delta b_{\text{pos}}$, $L_{\text{ratio}}$), gain ceilings, and skylight correction weights with live sliders.
+    \item Draw bounding boxes and stroke constraints to test GrabCut corrections in real time.
+    \item View PSNR, SSIM, and LAB RMSE scores calculated instantly against ground-truth images.
 \end{enumerate}
 
-\section{Complete Source Code Listings}
+\section{Complete Source Code}
 \label{sec:code}
-Below we present the complete implementation of the core pipeline modules.
+Here is the complete source code for our core modules.
 
 \subsection{\texttt{src/remove.py} — Radiometric Relighting}
 \begin{lstlisting}[language=Python]
