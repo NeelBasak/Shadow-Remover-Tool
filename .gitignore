@@ -1,0 +1,19 @@
+# Datasets (too large for Git; link them in the README instead)
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Generated outputs
+*_result.png
+experiments/results/*.png
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Keep specific example images for the demo
+!examples/*.png
