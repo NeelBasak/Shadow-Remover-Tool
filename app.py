@@ -384,3 +384,4 @@ with tab_about:
            - Restores penumbra lighting without boundary fringes or overexposure.
         """
     )
+
