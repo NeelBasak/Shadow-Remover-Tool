@@ -23,6 +23,8 @@ data/*
 *_result.png
 experiments/results*/*.png
 experiments/results*/worst/
+experiments/eval*
+
 
 # Editor / OS
 .vscode/
