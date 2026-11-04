@@ -1,0 +1,13 @@
+comparison,metric,mean_improvement,ci_low,ci_high,win_rate_percent,n_images
+full pipeline vs baseline,RMSE_LAB_shadow,1.057,0.197,2.190,65.0,20
+full pipeline vs baseline,PSNR,3.765,2.110,6.013,95.0,20
+"region relight vs global gain (both + blend, auto mask)",RMSE_LAB_shadow,0.046,-0.335,0.520,45.0,20
+"region relight vs global gain (both + blend, auto mask)",PSNR,-0.187,-0.573,0.186,45.0,20
+"region relight vs global gain (both + blend, GT mask)",RMSE_LAB_shadow,0.236,-0.241,0.775,60.0,20
+"region relight vs global gain (both + blend, GT mask)",PSNR,0.152,-0.078,0.395,55.0,20
+"blend vs no blend (region relight, auto mask)",RMSE_LAB_shadow,0.592,0.474,0.715,100.0,20
+"blend vs no blend (region relight, auto mask)",PSNR,1.011,0.788,1.222,100.0,20
+"guided filter vs none (region relight + blend, auto mask)",RMSE_LAB_shadow,0.089,0.066,0.114,95.0,20
+"guided filter vs none (region relight + blend, auto mask)",PSNR,0.162,0.109,0.216,95.0,20
+scribble refinement vs none,RMSE_LAB_shadow,0.627,0.071,1.325,55.0,20
+scribble refinement vs none,PSNR,0.417,-0.246,1.191,55.0,20
