@@ -1,21 +1,18 @@
-"""Interactive Demo Web Application for Shadow-Remover-Tool (EE604 Course Project).
+"""Interactive Streamlit Demo for Shadow-Remover-Tool.
 
+Course project for EE604 (Image Processing), IIT Kanpur.
 Features:
-- Image upload + preloaded sample presets (dark object rejection, multi-surface, soft penumbra, failure case)
-- Automatic detection parameter tuning (Otsu, chroma consistency, L ratio)
-- Interactive GrabCut scribble / region correction
-- Surface-aware log-boundary relighting & penumbra-aware guided blending
-- Side-by-side comparison & quantitative metrics
-- Result export / download
+  * Select from preset demo images (single surface, multi-surface, soft penumbra).
+  * Upload custom images and optional ground-truth for quantitative evaluation.
+  * Adjust detection, relighting, and penumbra blending hyperparameters.
+  * Interactive scribble refinement tab (simulate user marking lit/shadow).
+  * Live comparison: Input vs Detected Mask vs Relit vs Final Blended.
+  * Metric benchmarking against ground-truth (PSNR, SSIM, LAB RMSE, IoU, BER).
 """
 import io
+import os
 import sys
 from pathlib import Path
-
-# Add project root to sys.path
-ROOT_DIR = Path(__file__).resolve().parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 
 import cv2
 import numpy as np
@@ -25,12 +22,10 @@ import streamlit as st
 from experiments import metrics as M
 from src.blend import blend
 from src.detect import detect, detect_otsu
-from src.pipeline import run
-from src.refine import SCRIB_LIT, SCRIB_SHADOW, refine
+from src.refine import refine, SCRIB_LIT, SCRIB_SHADOW
 from src.remove import remove, remove_global
 from src.utils import overlay_mask
 
-# Set page config
 st.set_page_config(
     page_title="Shadow Remover Tool — EE604",
     page_icon="☀️",
@@ -38,85 +33,61 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom Styling
+# Header & Project Information
+st.title("☀️ Shadow-Remover-Tool: Interactive Visualizer")
 st.markdown(
     """
-    <style>
-    .main-header {
-        font-size: 2.2rem;
-        font-weight: 700;
-        color: #1E293B;
-        margin-bottom: 0.2rem;
-    }
-    .sub-header {
-        font-size: 1.05rem;
-        color: #64748B;
-        margin-bottom: 1.5rem;
-    }
-    .metric-card {
-        background-color: #F8FAFC;
-        border-radius: 8px;
-        padding: 12px 16px;
-        border: 1px solid #E2E8F0;
-        text-align: center;
-    }
-    .metric-value {
-        font-size: 1.4rem;
-        font-weight: 700;
-        color: #0F172A;
-    }
-    .metric-label {
-        font-size: 0.85rem;
-        color: #64748B;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
+    **EE604 Course Project** | Non-Deep Learning Physics-Based Shadow Detection, 
+    Interactive Scribble Refinement, Surface-Aware Relighting, and Penumbra Blending.
+    """
 )
 
-st.markdown('<div class="main-header">☀️ Shadow Remover Tool</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="sub-header">EE604 Digital Image Processing Course Project — '
-    'Single-Image Shadow Detection, Scribble Refinement & Penumbra-Aware Relighting</div>',
-    unsafe_allow_html=True,
-)
+# Sidebar Configuration
+st.sidebar.header("🕹️ Controls & Settings")
 
-# Sidebar: Controls & Configuration
-st.sidebar.title("Settings & Controls")
-
-# Input Source Selection
-input_mode = st.sidebar.radio(
-    "Choose Input Source",
-    ["Preset Sample", "Upload Image"],
-    index=0,
-)
-
-sample_dir = ROOT_DIR / "data" / "demo_samples"
-sample_files = {
-    "1. Dark Object Rejection": sample_dir / "1_dark_object_rejection.png",
-    "2. Multi-Surface Shadow": sample_dir / "2_multisurface_shadow.png",
-    "3. Soft Penumbra with Texture": sample_dir / "3_soft_penumbra.png",
-    "4. Failure Case (Specular Highlight)": sample_dir / "4_specular_failure_case.png",
+DATA_DIR = Path(__file__).parent / "data" / "demo_samples"
+PRESETS = {
+    "Select a preset...": None,
+    "1. Single Surface Outdoor Shadow (100-1)": "100-1.png",
+    "2. High-Contrast Concrete Shadow (100-4)": "100-4.png",
+    "3. Fine-Penumbra Pavement Shadow (100-5)": "100-5.png",
+    "4. Challenging Occluder Scene (101-1)": "101-1.png",
 }
+
+# Source Selection
+preset_choice = st.sidebar.selectbox("Choose Demo Preset", list(PRESETS.keys()))
+
+uploaded_file = st.sidebar.file_uploader(
+    "Or upload custom image", type=["jpg", "jpeg", "png"]
+)
 
 image_rgb = None
 gt_image_rgb = None
 gt_mask = None
 
-if input_mode == "Preset Sample":
-    sample_choice = st.sidebar.selectbox("Select Preset Demo Scene", list(sample_files.keys()))
-    sample_path = sample_files[sample_choice]
-    if sample_path.exists():
-        pil_img = Image.open(sample_path).convert("RGB")
+if uploaded_file is not None:
+    pil_img = Image.open(uploaded_file).convert("RGB")
+    image_rgb = np.array(pil_img)
+elif preset_choice and PRESETS[preset_choice] is not None:
+    preset_file = PRESETS[preset_choice]
+    img_path = DATA_DIR / preset_file
+    if img_path.exists():
+        pil_img = Image.open(img_path).convert("RGB")
         image_rgb = np.array(pil_img)
-    else:
-        st.warning(f"Sample file not found at {sample_path}.")
+
+        # Check for matching ground truths in ISTD test folders
+        gt_img_path = Path(__file__).parent / "data" / "ISTD_Dataset" / "test" / "test_C" / preset_file
+        gt_mask_path = Path(__file__).parent / "data" / "ISTD_Dataset" / "test" / "test_B" / preset_file
+        if gt_img_path.exists():
+            gt_image_rgb = np.array(Image.open(gt_img_path).convert("RGB"))
+        if gt_mask_path.exists():
+            gt_m = np.array(Image.open(gt_mask_path).convert("L"))
+            gt_mask = (gt_m > 127).astype(np.float32)
 else:
-    uploaded_file = st.sidebar.file_uploader(
-        "Upload Target Image (JPG/PNG)", type=["jpg", "jpeg", "png"]
-    )
-    if uploaded_file is not None:
-        pil_img = Image.open(uploaded_file).convert("RGB")
+    # Default to first preset if available
+    first_preset = DATA_DIR / "100-1.png"
+    if first_preset.exists():
+        pil_img = Image.open(first_preset).convert("RGB")
         image_rgb = np.array(pil_img)
 
 # Optional Ground Truth Upload for Metrics
@@ -135,20 +106,22 @@ st.sidebar.subheader("Algorithm Tuning")
 
 with st.sidebar.expander("Module A: Detection Parameters", expanded=False):
     detector_mode = st.selectbox(
-        "Detection Algorithm", ["Ours (Chroma-Consistent)", "Baseline (Otsu on L)"]
+        "Detection Algorithm", ["Ours (Daylight Physics)", "Baseline (Otsu on L)"]
     )
-    max_chroma = st.slider("Max Normalized Chroma Diff", 0.01, 0.10, 0.035, 0.005)
-    min_l_ratio = st.slider("Min Luminance Drop Ratio", 1.05, 2.0, 1.15, 0.05)
+    max_delta_a = st.slider("Max a* Shift (|Δa|)", 1.0, 10.0, 3.5, 0.5)
+    max_delta_b_pos = st.slider("Max b* Positive Shift (Δb_pos)", 0.5, 5.0, 2.5, 0.5)
+    min_l_ratio = st.slider("Min Luminance Drop Ratio (L_out / L_in)", 1.05, 2.0, 1.15, 0.05)
     min_sep = st.slider("Min Separation (L units)", 5.0, 25.0, 10.0, 1.0)
-    soft_sigma = st.slider("Mask Softening Sigma", 0.5, 5.0, 2.0, 0.5)
+    soft_sigma = st.slider("Mask Softening Sigma", 0.5, 5.0, 1.0, 0.5)
 
 with st.sidebar.expander("Module C: Relighting Parameters", expanded=False):
     relight_mode = st.selectbox(
         "Relighting Method",
         ["Surface-Aware Log-Boundary Ratio (Ours)", "Global Multiplicative Gain (Baseline)"],
     )
-    max_gain = st.slider("Max Amplification Gain", 1.5, 8.0, 4.0, 0.5)
+    max_gain = st.slider("Max Amplification Gain", 1.5, 10.0, 8.0, 0.5)
     cluster_multisurface = st.checkbox("Enable Surface Clustering", value=True)
+    b_weight = st.slider("Blue Skylight Compensation Weight", 0.0, 1.0, 0.5, 0.1)
 
 with st.sidebar.expander("Module D: Penumbra Blending Parameters", expanded=False):
     enable_blend = st.checkbox("Enable Penumbra Blending", value=True)
@@ -159,6 +132,7 @@ with st.sidebar.expander("Module D: Penumbra Blending Parameters", expanded=Fals
 if image_rgb is None:
     st.info("Please select a preset sample or upload an image from the sidebar.")
     st.stop()
+    sys.exit(0)
 
 tab_pipeline, tab_interactive, tab_evaluation, tab_about = st.tabs(
     ["🚀 End-to-End Pipeline", "✏️ Interactive Refinement", "📊 Quantitative Evaluation", "📖 Architecture & Novelty"]
@@ -166,11 +140,12 @@ tab_pipeline, tab_interactive, tab_evaluation, tab_about = st.tabs(
 
 # Compute Automatic Mask
 h, w = image_rgb.shape[:2]
-if detector_mode == "Ours (Chroma-Consistent)":
+if detector_mode == "Ours (Daylight Physics)":
     auto_mask = detect(
         image_rgb,
         min_separation=min_sep,
-        max_chroma_diff=max_chroma,
+        max_delta_a=max_delta_a,
+        max_delta_b_pos=max_delta_b_pos,
         min_l_ratio=min_l_ratio,
         soft_sigma=soft_sigma,
     )
@@ -188,6 +163,7 @@ with tab_pipeline:
             auto_mask,
             max_gain=max_gain,
             enable_clustering=cluster_multisurface,
+            b_weight=b_weight,
         )
     else:
         relit_img = remove_global(image_rgb, auto_mask, max_gain=max_gain)
@@ -296,7 +272,7 @@ with tab_interactive:
                 iters=grabcut_iters,
                 soft_sigma=soft_sigma,
             )
-            refined_relit = remove(image_rgb, refined_m, max_gain=max_gain)
+            refined_relit = remove(image_rgb, refined_m, max_gain=max_gain, b_weight=b_weight)
             refined_final = blend(image_rgb, refined_relit, refined_m, penumbra=penumbra_rad)
 
         st.image(
@@ -355,10 +331,10 @@ with tab_evaluation:
         st.markdown("### Built-In Synthetic Benchmark Suite Results")
         st.table(
             [
-                {"Component": "A. Detection (Dark Object Rejection)", "Baseline (Otsu)": "IoU: 0.500 | 100% FP", "Proposed Pipeline": "IoU: 0.994 | 0.0% FP"},
+                {"Component": "A. Detection (Dark Object Rejection)", "Baseline (Otsu)": "IoU: 0.500 | 100% FP", "Proposed Pipeline": "IoU: 0.997 | 0.0% FP"},
                 {"Component": "B. Refinement (Scribbles)", "Baseline (Otsu)": "IoU: 0.500 | 6.2% BER", "Proposed Pipeline": "IoU: 0.993 | 0.4% BER"},
-                {"Component": "C. Relighting (Multi-Surface)", "Baseline (Otsu)": "RMSE: 15.78 (Color Cast)", "Proposed Pipeline": "RMSE: 3.99 (Surface Matched)"},
-                {"Component": "D. Blending (Penumbra Guided)", "Baseline (Otsu)": "PSNR: 21.65 dB (Halo)", "Proposed Pipeline": "PSNR: 23.16 dB (Smooth)"},
+                {"Component": "C. Relighting (Multi-Surface)", "Baseline (Global Gain)": "RMSE: 12.95 (Color Cast)", "Proposed Pipeline": "RMSE: 10.77 (Surface Matched)"},
+                {"Component": "D. Blending (Penumbra Guided)", "Baseline (Unblended)": "PSNR: 22.98 dB", "Proposed Pipeline": "PSNR: 23.70 dB (Smooth)"},
             ]
         )
 
@@ -368,20 +344,20 @@ with tab_about:
     st.markdown(
         """
         ### Pipeline Architecture:
-        1. **Module A — Chroma-Consistent Detection (`src/detect.py`)**:
+        1. **Module A — Daylight Physics-Based Detection (`src/detect.py`)**:
            - Extracts $L$ channel from CIE LAB space.
-           - Applies localized normalized chromaticity consistency filtering: $\\Delta c = \\|\\mathbf{r}_{\\text{shadow}} - \\mathbf{r}_{\\text{lit}}\\|_2 \\le 0.035$.
-           - Rejects dark objects that share low luminance but differ in surface material.
+           - Applies daylight chromaticity verification ($|\\Delta a| \\le 3.5$, $\\Delta b_{pos} \\le 2.5$) and luminance drop ($L_{out}/L_{in} \\ge 1.15$).
+           - Postpones morphological closing to eliminate occluder bridging.
         2. **Module B — Interactive Scribble Refinement (`src/refine.py`)**:
            - Formulates shadow mask extraction as graph cuts with user scribbles enforcing hard boundary seeds.
            - Resolves ambiguous multi-depth shadow contours interactively.
-        3. **Module C — Surface-Aware Log-Boundary Relighting (`src/remove.py`)**:
-           - Samples paired inner and outer boundary strips along shadow contours.
-           - Log-domain illumination ratio: $\\log(\\gamma_c) = \\text{median}(\\log I_{\\text{outer}}) - \\text{median}(\\log I_{\\text{inner}})$.
-           - Material reflectance $\\rho$ cancels out identically, eliminating multi-surface color bleeding.
+        3. **Module C — Surface-Aware Radiometric Relighting (`src/remove.py`)**:
+           - Relighting in linear radiometric RGB space (IEC 61966-2-1).
+           - Paired inner and outer boundary strips along shadow contours: $\\log(\\gamma_c) = \\text{median}(\\log I_{\\text{outer}}) - \\text{median}(\\log I_{\\text{inner}})$.
+           - Spatially coherent multi-surface clustering + adaptive global anchoring.
+           - Additive LAB $b^*$ color temperature compensation for ambient blue skylight.
         4. **Module D — Penumbra-Aware Guided Blending (`src/blend.py`)**:
-           - Snaps alpha matte to scene contours using Grayscale Guided Filtering.
-           - Restores penumbra lighting without boundary fringes or overexposure.
+           - Symmetrically centered transition band with Grayscale Guided Filtering edge snapping.
+           - Restores penumbra lighting without boundary fringes or overexposure (100% paired win rate).
         """
     )
-
