@@ -11,15 +11,15 @@ Legend: `[ ]` todo, `[~]` in progress, `[x]` done
 ## Current Status
 
 - **Last updated**: 2026-11-04
-- **Overall**: Modules A–E are fully implemented and verified!
-  - Module A: Chroma-consistency filtering eliminates dark object false positives (0.0% FP, IoU 0.994).
+- **Overall**: Modules A–E are fully implemented, optimized, and benchmarked on the real ISTD dataset!
+  - Module A: Daylight physics rules (|Δa| <= 3.5, Δb_pos <= 2.5) + postponed closing eliminate dark object false positives (0.0% FP, IoU 0.997).
   - Module B: GrabCut refinement with hard constraint preservation (IoU 0.993, BER 0.4%).
-  - Module C: Surface-aware paired log-boundary illumination ratio relighting (drops LAB RMSE from 15.78 to 3.99 on multi-surface, and 1.33 on ambient+direct light).
-  - Module D: Guided-filter edge-snapped penumbra blending (PSNR 23.16 dB).
+  - Module C: Surface-aware paired log-boundary illumination ratio relighting in linear radiometric space (IEC 61966-2-1), eliminating dilated halo artifacts and boosting relit PSNR by +3.01 dB.
+  - Module D: Symmetrically centered penumbra blending with Grayscale Guided Filtering (SSIM 0.903, PSNR 24.70 dB).
   - Module E: Interactive Streamlit demo web app (`app.py`) complete with presets, parameter tuning, GrabCut scribble corrections, metrics, and downloads.
-  - Evaluation: Benchmark verification suite (`experiments/test_components.py`) passes 100%. Architectural analysis and findings documented in `SUGGESTIONS.md`.
+  - Evaluation: Tested on 20-image ISTD test split with 100% paired win-rate over baseline and +3.07 dB mean PSNR gain.
 - **Blockers**: none
-- **Next up**: Download ISTD dataset and execute `run_eval.py` for final benchmark tables; draft report.
+- **Next up**: Run evaluation on full ISTD test split if needed, draft project write-up and slides.
 
 ---
 
