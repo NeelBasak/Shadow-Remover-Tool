@@ -1,13 +1,13 @@
 comparison,metric,mean_improvement,ci_low,ci_high,win_rate_percent,n_images
-full pipeline vs baseline,RMSE_LAB_shadow,0.961,0.564,1.409,75.0,100
-full pipeline vs baseline,PSNR,3.981,3.194,4.835,94.0,100
-"region relight vs global gain (both + blend, auto mask)",RMSE_LAB_shadow,0.570,0.333,0.816,59.0,100
-"region relight vs global gain (both + blend, auto mask)",PSNR,0.352,0.197,0.520,62.0,100
-"region relight vs global gain (both + blend, GT mask)",RMSE_LAB_shadow,0.126,-0.060,0.339,46.0,100
-"region relight vs global gain (both + blend, GT mask)",PSNR,0.132,-0.019,0.298,54.0,100
-"blend vs no blend (region relight, auto mask)",RMSE_LAB_shadow,0.374,0.322,0.429,94.0,100
-"blend vs no blend (region relight, auto mask)",PSNR,0.587,0.523,0.655,100.0,100
-"guided filter vs none (region relight + blend, auto mask)",RMSE_LAB_shadow,0.120,0.103,0.139,95.0,100
-"guided filter vs none (region relight + blend, auto mask)",PSNR,0.230,0.202,0.256,100.0,100
-scribble refinement vs none,RMSE_LAB_shadow,0.246,-0.028,0.529,63.0,100
-scribble refinement vs none,PSNR,0.918,0.629,1.232,69.0,100
+full pipeline vs baseline,RMSE_LAB_shadow,1.147,0.319,2.242,70.0,20
+full pipeline vs baseline,PSNR,3.788,2.137,6.040,95.0,20
+"region relight vs global gain (both + blend, auto mask)",RMSE_LAB_shadow,0.136,-0.239,0.598,50.0,20
+"region relight vs global gain (both + blend, auto mask)",PSNR,-0.164,-0.551,0.202,55.0,20
+"region relight vs global gain (both + blend, GT mask)",RMSE_LAB_shadow,0.257,-0.217,0.796,60.0,20
+"region relight vs global gain (both + blend, GT mask)",PSNR,0.162,-0.064,0.401,60.0,20
+"blend vs no blend (region relight, auto mask)",RMSE_LAB_shadow,0.590,0.470,0.713,100.0,20
+"blend vs no blend (region relight, auto mask)",PSNR,0.997,0.775,1.206,100.0,20
+"guided filter vs none (region relight + blend, auto mask)",RMSE_LAB_shadow,0.089,0.066,0.114,95.0,20
+"guided filter vs none (region relight + blend, auto mask)",PSNR,0.162,0.108,0.216,95.0,20
+scribble refinement vs none,RMSE_LAB_shadow,0.560,0.065,1.190,60.0,20
+scribble refinement vs none,PSNR,0.404,-0.253,1.161,55.0,20

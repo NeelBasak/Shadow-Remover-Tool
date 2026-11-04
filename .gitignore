@@ -24,7 +24,10 @@ data/*
 experiments/results*/*.png
 experiments/results*/worst/
 experiments/eval*
+!experiments/eval*/*.csv
 
+# Scratch scripts
+scratch/
 
 # Editor / OS
 .vscode/
