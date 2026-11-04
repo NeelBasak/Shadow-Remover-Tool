@@ -34,6 +34,39 @@ def rgb_to_lab(img):
     return cv2.cvtColor(img.astype(np.float32) / 255.0, cv2.COLOR_RGB2LAB)
 
 
+def srgb_to_linear(img):
+    """Convert sRGB image to linear radiometric RGB (IEC 61966-2-1).
+
+    Accepts uint8 [0, 255] or float32. Returns float32 in [0, 1].
+    Optical radiance (I = rho * L) is linear with photon flux; camera images
+    are non-linear (~2.2 gamma). Relighting must occur in linear space.
+    """
+    x = img.astype(np.float32) / 255.0 if (img.dtype == np.uint8 or img.max() > 1.0) else img.astype(np.float32)
+    x = np.clip(x, 0.0, 1.0)
+    linear = np.where(x <= 0.04045, x / 12.92, ((x + 0.055) / 1.055) ** 2.4)
+    return linear.astype(np.float32)
+
+
+def linear_to_srgb(linear, as_uint8=True):
+    """Convert linear radiometric RGB back to display sRGB (IEC 61966-2-1).
+
+    Args:
+        linear: float32 linear RGB in [0, 1].
+        as_uint8: if True, returns uint8 in [0, 255]; otherwise float32 in [0, 1].
+    """
+    x = np.clip(linear.astype(np.float32), 0.0, 1.0)
+    srgb = np.where(x <= 0.0031308, x * 12.92, 1.055 * (x ** (1.0 / 2.4)) - 0.055)
+    srgb_255 = np.clip(np.round(srgb * 255.0), 0.0, 255.0)
+    return srgb_255.astype(np.uint8) if as_uint8 else (srgb_255 / 255.0).astype(np.float32)
+
+
+def normalized_rgb(img, eps=1e-5):
+    """Compute normalized chromaticity coordinates: (R, G, B) / (R + G + B + eps)."""
+    f = img.astype(np.float32)
+    s = f.sum(axis=-1, keepdims=True) + eps
+    return f / s
+
+
 def box_filter(x, r):
     """Mean filter with radius r (window 2r+1)."""
     return cv2.boxFilter(x, -1, (2 * r + 1, 2 * r + 1), borderType=cv2.BORDER_REPLICATE)

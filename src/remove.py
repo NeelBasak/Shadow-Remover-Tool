@@ -12,28 +12,36 @@ For every shadow component:
   1. We optionally cluster multi-surface shadows by chromaticity.
   2. For each sub-surface, we extract a paired inner strip (inside shadow) and
      outer strip (in lit band) along the boundary.
-  3. We estimate the per-channel illumination ratio in the log domain:
+  3. We estimate the per-channel illumination ratio in linear radiometric space:
      gain = clip(exp(median(log(outer)) - median(log(inner))), 1.0, max_gain).
-  4. This provides surface-consistent, artifact-free relighting.
+  4. Only pixels strictly within the shadow mask are relit (no dilated over-exposure).
+  5. This provides surface-consistent, artifact-free relighting.
 """
 import cv2
 import numpy as np
+
+from .utils import linear_to_srgb, normalized_rgb, srgb_to_linear
 
 
 def _ellipse(r):
     return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
 
 
-def remove_global(img, mask, max_gain=4.0):
+def remove_global(img, mask, max_gain=6.0, linear=True):
     """BASELINE: one gain per channel using all shadow vs all lit pixels."""
     binary = mask > 0.5
     if binary.sum() < 10 or (~binary).sum() < 10:
         return img.copy()
-    f = img.astype(np.float32)
-    gain = np.median(f[~binary], axis=0) / np.maximum(np.median(f[binary], axis=0), 1.0)
+
+    f = srgb_to_linear(img) if linear else img.astype(np.float32)
+    gain = np.median(f[~binary], axis=0) / np.maximum(np.median(f[binary], axis=0), 1e-4)
     gain = np.clip(gain, 1.0, max_gain)
+
     out = f.copy()
     out[binary] = f[binary] * gain
+
+    if linear:
+        return linear_to_srgb(out, as_uint8=True)
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
@@ -42,11 +50,12 @@ def remove(
     mask,
     gap=None,
     band=None,
-    max_gain=4.0,
+    max_gain=6.0,
     min_pixels=20,
     enable_clustering=True,
+    linear=True,
 ):
-    """Surface-aware log-boundary illumination ratio relighting. Returns RGB uint8.
+    """Surface-aware log-boundary illumination ratio relighting in linear radiometric space.
 
     Args:
         img: RGB uint8 image.
@@ -56,25 +65,26 @@ def remove(
         max_gain: upper bound on channel amplification.
         min_pixels: minimum pixels to compute reliable statistics.
         enable_clustering: whether to partition multi-surface shadows by chromaticity.
+        linear: whether to perform ratio estimation and relighting in linear radiometric space.
+
+    Returns:
+        RGB uint8 relit image.
     """
     h, w = img.shape[:2]
     scale = min(h, w)
     gap = gap if gap is not None else max(2, int(0.01 * scale))
     band = band if band is not None else max(5, int(0.03 * scale))
 
-    f = img.astype(np.float32)
     binary = (mask > 0.5).astype(np.uint8)
     if binary.sum() < min_pixels:
         return img.copy()
 
+    f = srgb_to_linear(img) if linear else img.astype(np.float32)
+    norm_rgb = normalized_rgb(f)
+    log_f = np.log(np.maximum(f, 1e-4))
+
     n, labels = cv2.connectedComponents(binary, connectivity=8)
     any_shadow_far = cv2.dilate(binary, _ellipse(gap + 1))
-
-    # Normalized RGB for chromaticity similarity
-    rgb_sum = f.sum(axis=2, keepdims=True) + 1e-5
-    norm_rgb = f / rgb_sum
-    log_f = np.log(f + 1.0)
-
     out = f.copy()
 
     for i in range(1, n):
@@ -87,8 +97,6 @@ def remove(
         ring = cv2.dilate(region, _ellipse(gap + band)) & (1 - any_shadow_far)
         if ring.sum() < min_pixels:
             ring = cv2.dilate(region, _ellipse(gap + band)) & (1 - binary)
-        if ring.sum() < 5:
-            continue
 
         # Sub-surface clustering for multi-surface shadows
         sub_regions = [region]
@@ -97,7 +105,7 @@ def remove(
             sample_chroma = norm_rgb[coords]
             chroma_std = np.std(sample_chroma, axis=0).sum()
             # If color variance indicates multiple surface materials, cluster into 2
-            if chroma_std > 0.04:
+            if chroma_std > 0.05:
                 criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
                 _, clabels, _ = cv2.kmeans(
                     sample_chroma, 2, None, criteria, 5, cv2.KMEANS_PP_CENTERS
@@ -143,10 +151,18 @@ def remove(
                 log_inner_median = np.median(log_f[inner_strip > 0], axis=0)
                 log_ratio = log_outer_median - log_inner_median
                 gain = np.clip(np.exp(log_ratio), 1.0, max_gain)
+            elif ring.sum() > 0 and sub.sum() > 0:
+                gain = np.clip(
+                    np.median(f[ring > 0], axis=0) / np.maximum(np.median(f[sub > 0], axis=0), 1e-4),
+                    1.0,
+                    max_gain,
+                )
             else:
                 gain = np.ones(3, dtype=np.float32)
 
-            apply_mask = cv2.dilate(sub, _ellipse(gap)).astype(bool)
-            out[apply_mask] = f[apply_mask] * gain
+            # Apply gain strictly to the shadow sub-region (no dilated halo artifact)
+            out[sub > 0] = f[sub > 0] * gain
 
+    if linear:
+        return linear_to_srgb(out, as_uint8=True)
     return np.clip(out, 0, 255).astype(np.uint8)
