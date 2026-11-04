@@ -4,14 +4,16 @@ Combines:
 1. Otsu thresholding on Gaussian-smoothed L channel.
 2. Hierarchical Otsu re-splitting if the dark class is too large (separating
    broad materials vs actual cast shadows).
-3. Physics-based daylight chromaticity verification:
-   - Green-Red axis invariance: |a_shadow - a_lit| <= 4.5.
+3. Morphological opening (noise suppression) WITHOUT premature closing, preventing
+   shadows from bridging into adjacent dark objects or occluders.
+4. Physics-based daylight chromaticity verification:
+   - Green-Red axis invariance: |a_shadow - a_lit| <= 3.5.
    - Blue skylight shift consistency: shadows may shift blue (negative b*),
      but cannot become yellower than sunlit surroundings (b_shadow - b_lit <= 2.5).
    - Luminance drop validation: L_lit / L_shadow >= 1.15.
    This cleanly rejects dark-colored materials (shoes, asphalt, dark brown objects)
    while preserving real outdoor shadows with blue ambient skylight.
-4. Morphological filtering, hole filling, and Gaussian softening.
+5. Post-validation morphological closing, hole filling, and Gaussian softening.
 """
 import cv2
 import numpy as np
@@ -34,7 +36,7 @@ def detect(
     max_delta_a=3.5,
     max_delta_b_pos=2.5,
     min_l_ratio=1.15,
-    soft_sigma=2.0,
+    soft_sigma=1.0,
     max_area_frac=0.5,
     max_splits=2,
 ):
@@ -83,12 +85,11 @@ def detect(
     if float(L[~shadow].mean() - L[shadow].mean()) < min_separation:
         return np.zeros((h, w), np.float32)
 
-    # Initial morphological cleanup
+    # Initial morphological cleanup: open ONLY (suppresses noise without bridging occluders)
     k = max(3, int(round(min(h, w) * 0.01)) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
     m = shadow.astype(np.uint8)
     m = cv2.morphologyEx(m, cv2.MORPH_OPEN, kernel)
-    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, kernel)
 
     # Component-level daylight physics check
     n, labels, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
@@ -134,6 +135,9 @@ def detect(
     for i in range(1, n2):
         if st2[i, cv2.CC_STAT_AREA] < min_area:
             keep[lab2 == i] = 1
+
+    # Apply morphological close ONLY after components are verified
+    keep = cv2.morphologyEx(keep, cv2.MORPH_CLOSE, kernel)
 
     soft = cv2.GaussianBlur(keep.astype(np.float32), (0, 0), soft_sigma)
     return np.clip(soft, 0.0, 1.0).astype(np.float32)
