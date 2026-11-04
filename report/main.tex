@@ -148,7 +148,7 @@ One critical detail: we \textbf{delay morphological closing} until after these c
 \subsection{Module B: Interactive Scribble Refinement}
 When an ambiguous patch (like dark asphalt) fools the detector, the user can drop scribbles on the screen. We store this as an array $S(x) \in \{0, 1, 2\}$, standing for untouched, shadow, and lit ground.
 
-The automated mask provides the initial guesses $\mathcal{F}_{\text{pr}}$ and $\mathcal{B}_{\text{pr}}$, while user strokes act as hard constraints:
+The automated mask provides the initial guesses, while user strokes act as hard constraints:
 \begin{equation}
 \mathcal{T}(x) = 
 \begin{cases}
@@ -158,7 +158,7 @@ The automated mask provides the initial guesses $\mathcal{F}_{\text{pr}}$ and $\
 \text{GC\_PR\_BGD}, & M_{\text{auto}}(x) \le 0.5 \land S(x) = 0
 \end{cases}
 \end{equation}
-We run GrabCut~\cite{rother2004grabcut} for 3 iterations on a 5-component GMM. On a laptop CPU, this takes roughly 300 ms—fast enough to feel instantaneous.
+We run GrabCut for 3 iterations on a 5-component GMM. On a laptop CPU, this takes roughly 300 ms—fast enough to feel instantaneous.
 
 \subsection{Module C: Surface-Aware Radiometric Relighting}
 \label{sec:relighting}
@@ -197,7 +197,7 @@ When the boundary strip has fewer than 100 matched pixels (common for thin shado
 If $\Delta b^* > 0$, we add $0.5 \cdot \Delta b^*$ back into the shadow pixels in $L^*a^*b^*$ space. This simple step strips away the lingering blue sky tint that multiplying brightness never touches.
 
 \subsection{Module D: Penumbra Blending with a Guided Filter}
-Swapping pixel values abruptly creates an obvious seam. We build a soft transition band by blurring the mask symmetrically along its true border ($\sigma = r_{\text{penumbra}}$). Then we run a Grayscale Guided Filter~\cite{he2010guided} using the input photo's lightness channel as the guide:
+Swapping pixel values abruptly creates an obvious seam. We build a soft transition band by blurring the mask symmetrically along its true border ($\sigma = r_{\text{penumbra}}$). Then we run a Grayscale Guided Filter using the input photo's lightness channel as the guide:
 \begin{equation}
 \alpha_{\text{final}} = \text{GuidedFilter}(I_{\text{gray}}, \alpha_{\text{blur}}, r = 2 r_{\text{penumbra}}, \epsilon = 10^{-3}).
 \end{equation}
@@ -643,22 +643,25 @@ def overlay_mask(img, mask, color=(255, 0, 0), alpha=0.5):
 
 \subsection{\texttt{src/pipeline.py} — Pipeline Entry Point}
 \begin{lstlisting}[language=Python]
-"""End-to-end pipeline and a small CLI."""
+"""End-to-end shadow removal pipeline and command-line interface."""
 import argparse
+from pathlib import Path
+import cv2
 import numpy as np
+
 from .blend import blend
 from .detect import detect
 from .refine import refine
 from .remove import remove
-from .utils import load_image, load_mask, save_image
+from .utils import load_image, load_mask, overlay_mask, save_image
 
-def run(img, mask=None, scribbles=None, use_blend=True, use_guided=True):
+def run(img, mask=None, scribbles=None, use_blend=True, use_guided=True, max_gain=8.0, b_weight=0.5, enable_clustering=True, penumbra=None):
     if mask is None:
         mask = detect(img)
-    mask = refine(img, mask, scribbles)
-    relit = remove(img, mask)
-    final = blend(img, relit, mask, use_guided=use_guided) if use_blend else relit
-    return final, mask, relit
+    if scribbles is not None and np.any(scribbles):
+        mask = refine(img, mask, scribbles)
+    relit = remove(img, mask, max_gain=max_gain, enable_clustering=enable_clustering, b_weight=b_weight)
+    return blend(img, relit, mask, penumbra=penumbra, use_guided=use_guided) if use_blend else relit, mask, relit
 \end{lstlisting}
 
 \end{document}
