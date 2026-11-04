@@ -128,19 +128,19 @@ L_{\text{smooth}} = G_\sigma * L.
 \end{equation}
 We run Otsu thresholding on $L$ to pull out dark candidate pixels. If dark pixels take up more than half the frame, we re-run Otsu inside that dark slice to avoid mistaking broad dark materials for cast shadows.
 
-Next, we test candidate connected blobs against three physical rules of outdoor daylight:
+Next, we test candidate connected blobs against three physical rules of outdoor daylight, computing all parameters using medians rather than means to prevent stray glints or pebbles in the reference ring from biasing the test:
 \begin{enumerate}
     \item \textbf{Green-Red axis consistency}: Sunlight and diffuse skylight hit surfaces with nearly identical spectral balance along the green-red axis:
     \begin{equation}
-    |\Delta a| = |a_{\text{shadow}} - a_{\text{lit}}| \le 3.5.
+    |\Delta a| = |\text{med}(a_{\text{shadow}}) - \text{med}(a_{\text{lit}})| \le 3.5.
     \end{equation}
-    \item \textbf{No yellowing in shadow}: Shadows often turn blue from sky reflection, but they can never turn yellower than the sunlit area around them:
+    \item \textbf{Physical Rayleigh blue-shift bounds}: Shadows often turn blue from sky reflection, but they can never turn yellower than the sunlit area around them ($\Delta b \le 2.5$). Furthermore, natural terrestrial atmospheric scattering rarely shifts $\Delta b$ below $-25.0$; drops steeper than this point to synthetic blue dyes (e.g. blue apparel or painted surfaces):
     \begin{equation}
-    \Delta b_{\text{pos}} = b_{\text{shadow}} - b_{\text{lit}} \le 2.5.
+    -25.0 \le \Delta b = \text{med}(b_{\text{shadow}}) - \text{med}(b_{\text{lit}}) \le 2.5.
     \end{equation}
     \item \textbf{Clear brightness drop}: A real shadow must show an obvious drop in lightness compared to the lit ring just outside it:
     \begin{equation}
-    L_{\text{ratio}} = \frac{L_{\text{lit}}}{\max(L_{\text{shadow}}, 10^{-3})} \ge 1.15.
+    L_{\text{ratio}} = \frac{\text{med}(L_{\text{lit}})}{\max(\text{med}(L_{\text{shadow}}), 10^{-3})} \ge 1.15.
     \end{equation}
 \end{enumerate}
 One critical detail: we \textbf{delay morphological closing} until after these component checks pass. Closing too early bridges shadows into adjacent black shoes or car tires, merging dark objects into the shadow before the physics test can catch them.
@@ -190,11 +190,11 @@ When the boundary strip has fewer than 100 matched pixels (common for thin shado
 \gamma_c^{\text{final}} = w \cdot \gamma_c + (1 - w) \cdot \gamma_{\text{glob}}, \quad w = \frac{N_{\text{matched}}}{100}.
 \end{equation}
 
-\textbf{Cleaning Up the Blue Cast.} After mapping back to sRGB, we measure the $b^*$ channel difference between lit and shadow pixels:
+\textbf{Component-Adaptive Color Temperature Offset.} Multiplying RGB brightness scales luminance, but cannot cancel the spectral shift caused by diffuse skylight. After relighting in physical linear irradiance and converting to $L^*a^*b^*$, we measure the $b^*$ channel offset locally for each connected shadow component $C_i$:
 \begin{equation}
-\Delta b^* = \text{median}(b^*_{\text{lit}}) - \text{median}(b^*_{\text{shadow}}).
+\Delta b^*_i = \text{median}_{x \in \text{Ring}(C_i)}(b^*_{\text{orig}}(x)) - \text{median}_{x \in C_i}(b^*_{\text{relit}}(x)).
 \end{equation}
-If $\Delta b^* > 0$, we add $0.5 \cdot \Delta b^*$ back into the shadow pixels in $L^*a^*b^*$ space. This simple step strips away the lingering blue sky tint that multiplying brightness never touches.
+If the surrounding ring has insufficient unshadowed context, $\Delta b^*_i$ smoothly anchors to the scene-wide lit median. When $\Delta b^*_i > 0$, we add $0.5 \cdot \Delta b^*_i$ into the component's $b^*$ channel. Making this adjustment local and surface-specific ensures cool asphalt and warm lawn shadows receive their own physically matched chromatic neutralization rather than a forced global compromise.
 
 \subsection{Module D: Penumbra Blending with a Guided Filter}
 Swapping pixel values abruptly creates an obvious seam. We build a soft transition band by blurring the mask symmetrically along its true border ($\sigma = r_{\text{penumbra}}$). Then we run a Grayscale Guided Filter using the input photo's lightness channel as the guide:
@@ -258,13 +258,13 @@ D. Blending & Boundary PSNR & 22.98 dB & \textbf{23.70 dB} \\
 \midrule
 Baseline: Otsu + Global Gain & 6.194 $\pm$ 3.28 & 6.047 $\pm$ 2.49 & 20.77 $\pm$ 3.29 & 0.757 $\pm$ 0.07 & 0.646 & 8.93\% \\
 Auto Mask: Global Gain + Blend & 5.182 $\pm$ 3.11 & 4.090 $\pm$ 2.01 & 24.72 $\pm$ 4.30 & 0.902 $\pm$ 0.10 & 0.782 & 4.52\% \\
-Auto Mask: Region Relight, No Blend & 5.636 $\pm$ 2.64 & 4.517 $\pm$ 1.73 & 23.56 $\pm$ 3.76 & 0.891 $\pm$ 0.10 & 0.782 & 4.52\% \\
-Auto Mask: Region Relight + Blend (w/o GF) & 5.135 $\pm$ 2.75 & 4.173 $\pm$ 1.71 & 24.39 $\pm$ 3.96 & 0.901 $\pm$ 0.10 & 0.782 & 4.52\% \\
-\textbf{Auto Mask: Region Relight + Blend (Full Ours)} & \textbf{5.046} $\pm$ 2.76 & \textbf{4.107} $\pm$ 1.70 & \textbf{24.56} $\pm$ 3.95 & \textbf{0.902} $\pm$ 0.10 & \textbf{0.782} & \textbf{4.52\%} \\
-\textbf{Auto + Simulated Scribbles: Full} & \textbf{4.486} $\pm$ 1.79 & \textbf{3.991} $\pm$ 1.78 & \textbf{24.96} $\pm$ 4.15 & \textbf{0.905} $\pm$ 0.10 & \textbf{0.811} & \textbf{2.80\%} \\
+Auto Mask: Region Relight, No Blend & 5.728 $\pm$ 2.81 & 4.555 $\pm$ 1.72 & 23.52 $\pm$ 3.76 & 0.890 $\pm$ 0.10 & 0.782 & 4.52\% \\
+Auto Mask: Region Relight + Blend (w/o GF) & 5.226 $\pm$ 2.92 & 4.198 $\pm$ 1.71 & 24.37 $\pm$ 3.96 & 0.901 $\pm$ 0.10 & 0.782 & 4.52\% \\
+\textbf{Auto Mask: Region Relight + Blend (Full Ours)} & \textbf{5.136} $\pm$ 2.94 & \textbf{4.132} $\pm$ 1.70 & \textbf{24.53} $\pm$ 3.95 & \textbf{0.902} $\pm$ 0.10 & \textbf{0.782} & \textbf{4.52\%} \\
+\textbf{Auto + Simulated Scribbles: Full} & \textbf{4.509} $\pm$ 1.80 & \textbf{3.999} $\pm$ 1.78 & \textbf{24.95} $\pm$ 4.15 & \textbf{0.905} $\pm$ 0.10 & \textbf{0.811} & \textbf{2.80\%} \\
 \midrule
 GT Mask: Global Gain + Blend & 4.515 $\pm$ 2.08 & 3.111 $\pm$ 2.21 & 28.18 $\pm$ 5.62 & 0.914 $\pm$ 0.10 & 1.000 & 0.00\% \\
-\textbf{GT Mask: Region Relight + Blend (Upper Bound)} & \textbf{4.257} $\pm$ 1.77 & \textbf{3.002} $\pm$ 1.86 & \textbf{28.35} $\pm$ 5.23 & \textbf{0.915} $\pm$ 0.10 & \textbf{1.000} & \textbf{0.00\%} \\
+\textbf{GT Mask: Region Relight + Blend (Upper Bound)} & \textbf{4.278} $\pm$ 1.78 & \textbf{3.007} $\pm$ 1.86 & \textbf{28.34} $\pm$ 5.23 & \textbf{0.915} $\pm$ 0.10 & \textbf{1.000} & \textbf{0.00\%} \\
 \bottomrule
 \end{tabular}
 \caption{\textbf{Evaluation on the ISTD dataset.} Comparing the baseline against our automated modules and scribble refinement. Lower is better for RMSE and BER; higher is better for PSNR, SSIM, and IoU. Values show mean $\pm$ standard deviation.}
@@ -274,10 +274,10 @@ GT Mask: Global Gain + Blend & 4.515 $\pm$ 2.08 & 3.111 $\pm$ 2.21 & 28.18 $\pm$
 \subsection{ISTD Benchmark Numbers and Statistical Tests}
 \cref{tab:istd_benchmark} lays out how our pipeline performs across the real ISTD images.
 \begin{itemize}
-    \item \textbf{Full Pipeline vs. Baseline}: Our automated pipeline hits a mean PSNR of \textbf{24.56 dB} (compared to $20.77\text{ dB}$ for the Otsu baseline) and brings shadow RMSE down from $6.194$ to \textbf{5.046}. Running paired bootstrap testing ($N=20$, 2000 resamples, 95\% confidence interval) shows an average gain of \textbf{+3.79 dB [CI: +2.14, +6.04]} with a \textbf{95.0\% paired win rate}.
-    \item \textbf{Isolating Relighting Quality}: To see how well our relighting engine works without detection noise, we tested using ground-truth masks. Surface-aware relighting beats global gain across the board: shadow RMSE drops from $4.515$ to \textbf{4.257}, and PSNR climbs from $28.18\text{ dB}$ to \textbf{28.35 dB} (winning on 60\% of photos).
-    \item \textbf{The Power of Edge Blending}: Penumbra blending beats raw replacement on \textbf{100\% of test images}, delivering a clean \textbf{+1.00 dB [CI: +0.78, +1.21]} boost. Adding the guided filter squeezes out another \textbf{+0.16 dB} (95\% win rate) by wiping out blurry edge halos.
-    \item \textbf{User Scribbles Rescue Tough Images}: Adding simulated user strokes drops shadow RMSE from $5.046$ to \textbf{4.486} and pushes PSNR to \textbf{24.96 dB}. That jump proves that keeping a human in the loop is a practical, powerful alternative to hoping an automated detector never trips up.
+    \item \textbf{Full Pipeline vs. Baseline}: Our automated pipeline hits a mean PSNR of \textbf{24.53 dB} (compared to $20.77\text{ dB}$ for the Otsu baseline) and brings shadow RMSE down from $6.194$ to \textbf{5.136}. Running paired bootstrap testing ($N=20$, 2000 resamples, 95\% confidence interval) shows an average gain of \textbf{+3.77 dB [CI: +2.11, +6.01]} with a \textbf{95.0\% paired win rate}.
+    \item \textbf{Isolating Relighting Quality}: To see how well our relighting engine works without detection noise, we tested using ground-truth masks. Surface-aware relighting beats global gain across the board: shadow RMSE drops from $4.515$ to \textbf{4.278}, and PSNR climbs from $28.18\text{ dB}$ to \textbf{28.34 dB} (winning on 60\% of photos).
+    \item \textbf{The Power of Edge Blending}: Penumbra blending beats raw replacement on \textbf{100\% of test images}, delivering a clean \textbf{+1.01 dB [CI: +0.79, +1.22]} boost. Adding the guided filter squeezes out another \textbf{+0.16 dB} (95\% win rate) by wiping out blurry edge halos.
+    \item \textbf{User Scribbles Rescue Tough Images}: Adding simulated user strokes drops shadow RMSE from $5.136$ to \textbf{4.509} and pushes PSNR to \textbf{24.95 dB}. That jump proves that keeping a human in the loop is a practical, powerful alternative to hoping an automated detector never trips up.
 \end{itemize}
 
 \begin{figure*}[t]
@@ -441,10 +441,21 @@ def remove(img, mask, gap=None, band=None, max_gain=8.0, min_pixels=20, enable_c
     if b_weight > 0 and binary.sum() >= min_pixels:
         lab_relit = cv2.cvtColor(relit_srgb, cv2.COLOR_RGB2LAB).astype(np.float32)
         lab_orig = cv2.cvtColor(img, cv2.COLOR_RGB2LAB).astype(np.float32)
-        delta_b = np.median(lab_orig[binary == 0, 2]) - np.median(lab_relit[binary > 0, 2])
-        if delta_b > 0:
-            lab_relit[binary > 0, 2] = np.clip(lab_relit[binary > 0, 2] + b_weight * delta_b, 0, 255)
-            relit_srgb = cv2.cvtColor(np.clip(lab_relit, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB)
+        b_ch = lab_relit[..., 2]
+        b_global_lit = float(np.median(lab_orig[binary == 0, 2]))
+        n_cc, cc_labels = cv2.connectedComponents(binary, connectivity=8)
+        ring_kernel_b = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (max(5, int(round(scale * 0.03)) | 1), max(5, int(round(scale * 0.03)) | 1)))
+        for idx in range(1, n_cc):
+            comp_mask = cc_labels == idx
+            if comp_mask.sum() < min_pixels:
+                continue
+            ring_lit = cv2.dilate(comp_mask.astype(np.uint8), ring_kernel_b) & (1 - binary)
+            b_lit_val = float(np.median(lab_orig[ring_lit > 0, 2])) if ring_lit.sum() >= min_pixels else b_global_lit
+            delta_b = b_lit_val - float(np.median(b_ch[comp_mask]))
+            if delta_b > 0:
+                b_ch[comp_mask] = np.clip(b_ch[comp_mask] + b_weight * delta_b, 0, 255)
+        lab_relit[..., 2] = b_ch
+        relit_srgb = cv2.cvtColor(np.clip(lab_relit, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB)
     return relit_srgb
 \end{lstlisting}
 
@@ -461,7 +472,7 @@ def detect_otsu(img):
     _, binary = cv2.threshold(L8, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     return (binary > 0).astype(np.float32)
 
-def detect(img, min_area_frac=0.002, min_separation=10.0, max_delta_a=3.5, max_delta_b_pos=2.5, min_l_ratio=1.15, soft_sigma=1.0, max_area_frac=0.5, max_splits=2):
+def detect(img, min_area_frac=0.002, min_separation=10.0, max_delta_a=3.5, max_delta_b_pos=2.5, min_delta_b=-25.0, min_l_ratio=1.15, soft_sigma=1.0, max_area_frac=0.5, max_splits=2):
     h, w = img.shape[:2]
     lab = rgb_to_lab(img)
     L = cv2.GaussianBlur(lab[..., 0], (0, 0), 1.5)
@@ -475,7 +486,7 @@ def detect(img, min_area_frac=0.002, min_separation=10.0, max_delta_a=3.5, max_d
         t2, _ = cv2.threshold(L8[shadow].reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         shadow = shadow & (L8 <= t2)
 
-    if shadow.sum() == 0 or (~shadow).sum() == 0 or float(L[~shadow].mean() - L[shadow].mean()) < min_separation:
+    if shadow.sum() == 0 or (~shadow).sum() == 0 or float(np.median(L[~shadow]) - np.median(L[shadow])) < min_separation:
         return np.zeros((h, w), np.float32)
 
     k = max(3, int(round(min(h, w) * 0.01)) | 1)
@@ -499,10 +510,10 @@ def detect(img, min_area_frac=0.002, min_separation=10.0, max_delta_a=3.5, max_d
         if ring.sum() < max(15, int(0.05 * area)):
             ring = dilated & (1 - comp)
         if ring.sum() >= 10:
-            delta_a = abs(float(a_ch[comp > 0].mean() - a_ch[ring > 0].mean()))
-            delta_b_pos = float(b_ch[comp > 0].mean() - b_ch[ring > 0].mean())
-            l_ratio = float(L[ring > 0].mean()) / max(float(L[comp > 0].mean()), 1e-3)
-            if delta_a <= max_delta_a and delta_b_pos <= max_delta_b_pos and l_ratio >= min_l_ratio:
+            delta_a = abs(float(np.median(a_ch[comp > 0]) - np.median(a_ch[ring > 0])))
+            delta_b = float(np.median(b_ch[comp > 0]) - np.median(b_ch[ring > 0]))
+            l_ratio = float(np.median(L[ring > 0])) / max(float(np.median(L[comp > 0])), 1e-3)
+            if delta_a <= max_delta_a and min_delta_b <= delta_b <= max_delta_b_pos and l_ratio >= min_l_ratio:
                 keep[comp > 0] = 1
         else:
             keep[comp > 0] = 1

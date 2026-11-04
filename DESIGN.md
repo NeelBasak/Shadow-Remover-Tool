@@ -2,7 +2,7 @@
 
 EE604 Course Project (group of 5). Write-up due **Nov 6, 2026**; presentation and demo **Nov 7-8, 2026**.
 
-> Status of this document: design v3.0, updated 2026-11-05 following radiometric linear relighting, robust multi-surface clustering, blue skylight compensation, and ISTD benchmark evaluation.
+> Status of this document: design v3.1, updated 2026-11-05 following outlier-resistant median daylight detection, deep blue rejection (-25 <= Δb <= 2.5), component-adaptive blue skylight compensation, and verified ISTD benchmarks.
 
 ---
 
@@ -78,10 +78,11 @@ EE604 Course Project (group of 5). Write-up due **Nov 6, 2026**; presentation an
 - CIE LAB color space conversion.
 - Gaussian smoothing ($\sigma = 1.5$) + Otsu thresholding on $L$ channel.
 - Hierarchical re-thresholding if dark class fraction exceeds 50%.
-- Daylight chromaticity consistency validation:
+- Outlier-resistant median daylight chromaticity consistency validation:
   - Green-Red axis invariance: $|\Delta a| \le 3.5$.
-  - Blue skylight shift consistency: $\Delta b_{\text{pos}} \le 2.5$.
+  - Rayleigh blue skylight bounds: $-25.0 \le \Delta b \le 2.5$ (cleanly rejecting pigmented blue fabrics and paint).
   - Luminance drop validation: $L_{\text{out}} / L_{\text{in}} \ge 1.15$.
+  - All metrics computed using medians over component and surrounding lit ring.
 - Post-validation morphological cleanup (postponed closing prevents occluder bridging).
 
 ### Module B: Refinement (`src/refine.py`)
@@ -98,7 +99,7 @@ EE604 Course Project (group of 5). Write-up due **Nov 6, 2026**; presentation an
   $$\log(\gamma_c) = \text{median}(\log I_{\text{outer}}) - \text{median}(\log I_{\text{inner}})$$
   $$\text{gain}_c = \text{clip}(\exp(\log \gamma_c), 1.0, 8.0)$$
 - Adaptive anchor: smooth interpolation towards global gain when local boundary pixels are sparse.
-- Additive color temperature compensation on CIE LAB $b^*$ channel for ambient blue skylight neutralization.
+- Component-adaptive color temperature compensation on CIE LAB $b^*$ channel: local $\Delta b^*_i$ per component with global anchor fallback for ambient blue skylight neutralization.
 
 ### Module D: Penumbra Blending (`src/blend.py`)
 - Transition band centered directly on the physical shadow boundary.
@@ -123,26 +124,26 @@ EE604 Course Project (group of 5). Write-up due **Nov 6, 2026**; presentation an
 | D. Blending | Penumbra Edge Smoothing | PSNR: 22.98 dB | **PSNR: 23.70 dB** | Artifact-free boundary transition |
 | E. Pipeline | End-to-End Verification | Baseline PSNR: 11.2 dB | **Pipeline PSNR: 15.33 dB** | Cohesive component integration |
 
-### 5.2 ISTD Benchmark Dataset Evaluation (`eval_istd20_v2`)
+### 5.2 ISTD Benchmark Dataset Evaluation (`results_v3`)
 
 | Method / Configuration | Shadow RMSE ↓ | All RMSE ↓ | PSNR ↑ | SSIM ↑ | Mask IoU ↑ | Mask BER ↓ |
 |---|---|---|---|---|---|---|
 | Baseline (Otsu + Global Gain) | 6.194 | 6.047 | 20.77 dB | 0.757 | 0.646 | 8.93% |
 | Auto Mask: Global Gain + Blend | 5.182 | 4.090 | 24.72 dB | 0.902 | 0.782 | 4.52% |
-| Auto Mask: Region Relight, No Blend | 5.636 | 4.517 | 23.56 dB | 0.891 | 0.782 | 4.52% |
-| **Auto Mask: Region Relight + Blend (Full Ours)** | **5.046** | **4.107** | **24.56 dB** | **0.902** | **0.782** | **4.52%** |
-| **Auto + Simulated Scribbles: Full** | **4.486** | **3.991** | **24.96 dB** | **0.905** | **0.811** | **2.80%** |
+| Auto Mask: Region Relight, No Blend | 5.728 | 4.555 | 23.52 dB | 0.890 | 0.782 | 4.52% |
+| **Auto Mask: Region Relight + Blend (Full Ours)** | **5.136** | **4.132** | **24.53 dB** | **0.902** | **0.782** | **4.52%** |
+| **Auto + Simulated Scribbles: Full** | **4.509** | **3.999** | **24.95 dB** | **0.905** | **0.811** | **2.80%** |
 | GT Mask: Global Gain + Blend | 4.515 | 3.111 | 28.18 dB | 0.914 | 1.000 | 0.00% |
-| **GT Mask: Region Relight + Blend (Upper Bound)** | **4.257** | **3.002** | **28.35 dB** | **0.915** | **1.000** | **0.00%** |
+| **GT Mask: Region Relight + Blend (Upper Bound)** | **4.278** | **3.007** | **28.34 dB** | **0.915** | **1.000** | **0.00%** |
 
 ### 5.3 Paired Statistical Comparisons ($N=20$, 95% Bootstrap CI)
 
 | Comparison Hypothesis | Metric | Mean Improvement | 95% Bootstrap CI | Win Rate |
 |---|---|---|---|---|
-| **Full Pipeline vs Baseline** | PSNR (dB) | **+3.79 dB** | **[+2.14, +6.04]** | **95.0%** |
-| Full Pipeline vs Baseline | Shadow RMSE | **+1.15** | **[+0.32, +2.24]** | **70.0%** |
-| **Region Relight vs Global Gain (GT Mask)** | PSNR (dB) | **+0.16 dB** | **[-0.06, +0.40]** | **60.0%** |
-| Region Relight vs Global Gain (GT Mask) | Shadow RMSE | **+0.26** | **[-0.22, +0.80]** | **60.0%** |
-| **Penumbra Blending vs No Blending** | PSNR (dB) | **+1.00 dB** | **[+0.78, +1.21]** | **100.0%** |
+| **Full Pipeline vs Baseline** | PSNR (dB) | **+3.77 dB** | **[+2.11, +6.01]** | **95.0%** |
+| Full Pipeline vs Baseline | Shadow RMSE | **+1.06** | **[+0.20, +2.19]** | **65.0%** |
+| **Region Relight vs Global Gain (GT Mask)** | PSNR (dB) | **+0.15 dB** | **[-0.08, +0.40]** | **55.0%** |
+| Region Relight vs Global Gain (GT Mask) | Shadow RMSE | **+0.24** | **[-0.24, +0.78]** | **60.0%** |
+| **Penumbra Blending vs No Blending** | PSNR (dB) | **+1.01 dB** | **[+0.79, +1.22]** | **100.0%** |
 | **Guided Filter vs Standard Blurring** | PSNR (dB) | **+0.16 dB** | **[+0.11, +0.22]** | **95.0%** |
-| **Interactive Scribbles vs Auto Detector** | Shadow RMSE | **+0.56** | **[+0.07, +1.19]** | **60.0%** |
+| **Interactive Scribbles vs Auto Detector** | Shadow RMSE | **+0.63** | **[+0.07, +1.33]** | **55.0%** |
