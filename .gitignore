@@ -1,31 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+*.tmp
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+.ipynb_checkpoints/
+
 # Datasets and archives (too large for Git; link them in the README)
-data/
+data/*
+!data/demo_samples/
 *.rar
 *.zip
 *.7z
 
-# Python
-__pycache__/
-*.pyc
-.venv/
-.ipynb_checkpoints/
-
-# Generated outputs from try_it.py
+# Generated outputs from try_it.py and eval
 *_result.png
-
-# Evaluation outputs: keep the small CSVs, drop the images
 experiments/results*/*.png
 experiments/results*/worst/
 
-# Logs and temp files
-*.log
-*.tmp
-
 # Editor / OS
 .vscode/
+.idea/
 .DS_Store
 Thumbs.db
 
 # Keep specific example images for the demo
 !examples/*.png
 !examples/*.jpg
+!data/demo_samples/*

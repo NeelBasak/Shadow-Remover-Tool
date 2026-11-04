@@ -1,12 +1,21 @@
-"""Module C: region-matched relighting.
+"""Module C: region-matched, surface-aware relighting using boundary-strip ratios.
 
-For every connected shadow region we estimate a per-channel multiplicative
-gain that maps the shadow core to the lit pixels of the SAME surface (a thin
-band just outside the shadow). This is the "region-matched" part of our
-contribution. The global version (one gain for the whole image) is kept as a
-baseline.
+Physics of shadow formation:
+    I_lit = rho * (L_direct + L_ambient)
+    I_shadow = rho * L_ambient
+
+Across the shadow boundary on the SAME surface, the material reflectance rho is
+identical and cancels out in the log-domain illumination ratio:
+    log(I_lit) - log(I_shadow) = log((L_direct + L_ambient) / L_ambient)
+
+For every shadow component:
+  1. We optionally cluster multi-surface shadows by chromaticity.
+  2. For each sub-surface, we extract a paired inner strip (inside shadow) and
+     outer strip (in lit band) along the boundary.
+  3. We estimate the per-channel illumination ratio in the log domain:
+     gain = clip(exp(median(log(outer)) - median(log(inner))), 1.0, max_gain).
+  4. This provides surface-consistent, artifact-free relighting.
 """
-
 import cv2
 import numpy as np
 
@@ -21,48 +30,123 @@ def remove_global(img, mask, max_gain=4.0):
     if binary.sum() < 10 or (~binary).sum() < 10:
         return img.copy()
     f = img.astype(np.float32)
-    gain = f[~binary].mean(0) / np.maximum(f[binary].mean(0), 1.0)
+    gain = np.median(f[~binary], axis=0) / np.maximum(np.median(f[binary], axis=0), 1.0)
     gain = np.clip(gain, 1.0, max_gain)
     out = f.copy()
-    out[binary] *= gain
+    out[binary] = f[binary] * gain
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
-def remove(img, mask, gap=None, band=None, max_gain=4.0, min_pixels=30):
-    """Region-matched relighting. Returns an RGB uint8 image.
-
-    The result is "hard": the gain is applied inside the (slightly dilated)
-    shadow region. Edge softness is handled afterwards by blend.blend().
+def remove(
+    img,
+    mask,
+    gap=None,
+    band=None,
+    max_gain=4.0,
+    min_pixels=20,
+    enable_clustering=True,
+):
+    """Surface-aware log-boundary illumination ratio relighting. Returns RGB uint8.
 
     Args:
-        gap: pixels skipped next to the boundary (penumbra) when sampling.
-        band: width in pixels of the lit reference band.
+        img: RGB uint8 image.
+        mask: float32 shadow mask in [0, 1].
+        gap: margin in pixels skipped at the immediate boundary (penumbra exclusion).
+        band: width in pixels of the sampling boundary strip.
+        max_gain: upper bound on channel amplification.
+        min_pixels: minimum pixels to compute reliable statistics.
+        enable_clustering: whether to partition multi-surface shadows by chromaticity.
     """
     h, w = img.shape[:2]
     scale = min(h, w)
     gap = gap if gap is not None else max(2, int(0.01 * scale))
-    band = band if band is not None else max(6, int(0.04 * scale))
+    band = band if band is not None else max(5, int(0.03 * scale))
 
     f = img.astype(np.float32)
     binary = (mask > 0.5).astype(np.uint8)
+    if binary.sum() < min_pixels:
+        return img.copy()
+
     n, labels = cv2.connectedComponents(binary, connectivity=8)
-    any_shadow_far = cv2.dilate(binary, _ellipse(gap + 1))  # exclusion zone
+    any_shadow_far = cv2.dilate(binary, _ellipse(gap + 1))
+
+    # Normalized RGB for chromaticity similarity
+    rgb_sum = f.sum(axis=2, keepdims=True) + 1e-5
+    norm_rgb = f / rgb_sum
+    log_f = np.log(f + 1.0)
 
     out = f.copy()
+
     for i in range(1, n):
         region = (labels == i).astype(np.uint8)
-        core = cv2.erode(region, _ellipse(gap))
-        ring = cv2.dilate(region, _ellipse(gap + band)) & (1 - any_shadow_far)
-        if core.sum() < min_pixels or ring.sum() < min_pixels:
-            # fall back to the whole region if erosion removed it
-            core = region
-            if core.sum() < min_pixels or ring.sum() < min_pixels:
-                continue
-        s_mean = f[core > 0].mean(0)
-        l_mean = f[ring > 0].mean(0)
-        gain = np.clip(l_mean / np.maximum(s_mean, 1.0), 1.0, max_gain)
+        reg_pixels = region.sum()
+        if reg_pixels < min_pixels:
+            continue
 
-        # Apply over the region plus a small margin so the penumbra is covered.
-        apply = region.astype(bool)
-        out[apply] = f[apply] * gain
+        # Lit reference ring for this component
+        ring = cv2.dilate(region, _ellipse(gap + band)) & (1 - any_shadow_far)
+        if ring.sum() < min_pixels:
+            ring = cv2.dilate(region, _ellipse(gap + band)) & (1 - binary)
+        if ring.sum() < 5:
+            continue
+
+        # Sub-surface clustering for multi-surface shadows
+        sub_regions = [region]
+        if enable_clustering and reg_pixels >= 250:
+            coords = np.where(region > 0)
+            sample_chroma = norm_rgb[coords]
+            chroma_std = np.std(sample_chroma, axis=0).sum()
+            # If color variance indicates multiple surface materials, cluster into 2
+            if chroma_std > 0.04:
+                criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+                _, clabels, _ = cv2.kmeans(
+                    sample_chroma, 2, None, criteria, 5, cv2.KMEANS_PP_CENTERS
+                )
+                sub0 = np.zeros((h, w), dtype=np.uint8)
+                sub1 = np.zeros((h, w), dtype=np.uint8)
+                sub0[coords[0][clabels.flatten() == 0], coords[1][clabels.flatten() == 0]] = 1
+                sub1[coords[0][clabels.flatten() == 1], coords[1][clabels.flatten() == 1]] = 1
+                if sub0.sum() >= min_pixels and sub1.sum() >= min_pixels:
+                    sub_regions = [sub0, sub1]
+
+        for sub in sub_regions:
+            # Paired inner strip: just inside shadow boundary
+            inner_strip = cv2.erode(sub, _ellipse(gap)) & (1 - cv2.erode(sub, _ellipse(gap + band)))
+            if inner_strip.sum() < min_pixels:
+                inner_strip = cv2.erode(sub, _ellipse(gap))
+            if inner_strip.sum() < min_pixels:
+                inner_strip = sub
+
+            # Paired outer strip: lit pixels outside boundary matching sub-surface chromaticity
+            outer_strip = cv2.dilate(sub, _ellipse(gap + band)) & (1 - any_shadow_far)
+            if outer_strip.sum() < 5:
+                outer_strip = ring
+
+            sub_chroma = norm_rgb[sub > 0].mean(axis=0)
+            outer_coords = np.where(outer_strip > 0)
+            outer_chroma = norm_rgb[outer_coords]
+            chroma_dists = np.linalg.norm(outer_chroma - sub_chroma, axis=1)
+
+            # Filter outer strip to pixels belonging to the same surface
+            matched_indices = np.where(chroma_dists < 0.12)[0]
+            if len(matched_indices) >= min_pixels:
+                matched_outer = (
+                    outer_coords[0][matched_indices],
+                    outer_coords[1][matched_indices],
+                )
+            else:
+                matched_outer = outer_coords
+
+            # Log-domain ratio estimation
+            if len(matched_outer[0]) > 0 and inner_strip.sum() > 0:
+                log_outer_median = np.median(log_f[matched_outer], axis=0)
+                log_inner_median = np.median(log_f[inner_strip > 0], axis=0)
+                log_ratio = log_outer_median - log_inner_median
+                gain = np.clip(np.exp(log_ratio), 1.0, max_gain)
+            else:
+                gain = np.ones(3, dtype=np.float32)
+
+            apply_mask = cv2.dilate(sub, _ellipse(gap)).astype(bool)
+            out[apply_mask] = f[apply_mask] * gain
+
     return np.clip(out, 0, 255).astype(np.uint8)
