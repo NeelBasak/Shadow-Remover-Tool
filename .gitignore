@@ -1,14 +1,25 @@
-# Datasets (too large for Git; link them in the README instead)
+# Datasets and archives (too large for Git; link them in the README)
 data/
+*.rar
+*.zip
+*.7z
 
 # Python
 __pycache__/
 *.pyc
 .venv/
+.ipynb_checkpoints/
 
-# Generated outputs
+# Generated outputs from try_it.py
 *_result.png
-experiments/results/*.png
+
+# Evaluation outputs: keep the small CSVs, drop the images
+experiments/results*/*.png
+experiments/results*/worst/
+
+# Logs and temp files
+*.log
+*.tmp
 
 # Editor / OS
 .vscode/
@@ -17,3 +28,4 @@ Thumbs.db
 
 # Keep specific example images for the demo
 !examples/*.png
+!examples/*.jpg

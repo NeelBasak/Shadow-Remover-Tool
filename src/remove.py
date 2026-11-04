@@ -6,6 +6,7 @@ band just outside the shadow). This is the "region-matched" part of our
 contribution. The global version (one gain for the whole image) is kept as a
 baseline.
 """
+
 import cv2
 import numpy as np
 
@@ -62,6 +63,6 @@ def remove(img, mask, gap=None, band=None, max_gain=4.0, min_pixels=30):
         gain = np.clip(l_mean / np.maximum(s_mean, 1.0), 1.0, max_gain)
 
         # Apply over the region plus a small margin so the penumbra is covered.
-        apply = cv2.dilate(region, _ellipse(gap)).astype(bool)
+        apply = region.astype(bool)
         out[apply] = f[apply] * gain
     return np.clip(out, 0, 255).astype(np.uint8)
