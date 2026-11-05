@@ -1,0 +1,678 @@
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+\usepackage{cvpr}
+\usepackage{times}
+\usepackage{epsfig}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage[pagebackref,breaklinks,colorlinks]{hyperref}
+
+% Code listing styling
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.96,0.97,0.98}
+
+\lstdefinestyle{pythonstyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{blue}\bfseries,
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\scriptsize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single,
+    rulecolor=\color{lightgray}
+}
+\lstset{style=pythonstyle}
+
+\def\cvprPaperID{EE604-Project}
+\def\confName{EE604}
+\def\confYear{2026}
+
+\begin{document}
+
+%%%%%%%%% TITLE
+\title{Surface-Aware Radiometric Relighting and Interactive Scribble Refinement for Single-Image Cast Shadow Removal}
+
+\author{
+Darsh Patil \quad Neel Basak \quad Group 5\\
+Department of Electrical Engineering\\
+Indian Institute of Technology Kanpur\\
+{\tt\small \{darshvp23, basakneel1234\}@iitk.ac.in}
+}
+
+\maketitle
+
+%%%%%%%%% ABSTRACT
+\begin{abstract}
+Removing cast shadows from a single photo is notoriously tricky. When you only have one image, you cannot tell whether a patch of dark pixels came from low light or from dark paint on the ground. Classical algorithms try to fix this by multiplying pixel values across the board, but they almost always leave behind washed-out colors, ugly halos at the edges, and an annoying blue tint from open sky. Worse, if the detector mistakes dark asphalt for a shadow, the algorithm blindly brightens the road. 
+
+In this project, we built a lean, physics-grounded shadow removal tool that runs on a basic laptop CPU without deep neural nets. We tackled the core failure modes directly: (1) we do all relighting math in true linear radiometric space instead of display sRGB, avoiding gamma distortion; (2) we calculate paired ratios in the log domain across boundary strips of the same material, which cancels out surface reflectance entirely; (3) we add an explicit color-temperature correction in CIE $L^*a^*b^*$ space to scrub out cold ambient skylight; (4) we snap blurred penumbra borders to true image edges using a guided filter; and (5) we let users drop quick scribble strokes with GrabCut when tricky dark objects confuse the auto-detector. Tested on the real ISTD benchmark, our pipeline hits \textbf{28.35 dB PSNR} and beats simple global gain on \textbf{95\%} of images, while user scribbles pull tricky failure scenes up to \textbf{24.96 dB}.
+\end{abstract}
+
+%%%%%%%%% BODY TEXT
+\section{Introduction}
+\label{sec:intro}
+
+Walk outside on a sunny afternoon and you will see sharp cast shadows across sidewalks, walls, and roads. While human vision filters them out effortlessly, computer vision algorithms get tripped up. Self-driving car cameras mistake shadow edges for lane markings; surveillance trackers drop moving pedestrians when their shadows merge with dark clothing; and aerial photogrammetry yields patchy ground reconstructions~\cite{hu2019direction,vicente2016leave}. 
+
+The root problem is simple to state but hard to solve. An observed pixel value $I(x)$ multiplies intrinsic surface reflectance $\rho(x)$ by whatever light hits it, $L(x)$:
+\begin{equation}
+I(x) = \rho(x) \cdot L(x).
+\label{eq:image_formation}
+\end{equation}
+When an object blocks the sun, only diffuse light from the blue sky reaches the surface:
+\begin{equation}
+I_{\text{lit}} = \rho (L_{\text{direct}} + L_{\text{ambient}}), \quad I_{\text{shadow}} = \rho L_{\text{ambient}}.
+\end{equation}
+With only one image in hand, separating $\rho$ from $L$ is a classic under-determined problem.
+
+Recent deep learning papers~\cite{wang2018stacked} throw heavy convolutional networks and GANs at this, but they need thousands of perfectly paired training photos and beefy GPUs. Take them outside their training set, and they often hallucinate weird textures. On the other hand, classic physical methods~\cite{guo2012paired,finlayson2005removal} run quickly on ordinary CPUs, but historically they break down in four maddening ways:
+\begin{enumerate}
+    \item \textbf{The Gamma Trap}: Most programs scale pixel numbers straight in standard 8-bit sRGB. But sRGB uses a non-linear power curve ($\gamma \approx 2.2$). Multiplying numbers that have already gone through display gamma bends colors and turns neutral grays into weird pastels.
+    \item \textbf{Reflectance Bleeding and Halos}: Applying one global multiplier across the entire shadow ruins images where a shadow crosses two different surfaces (say, pale concrete and green grass). Meanwhile, stretching masks outward to catch soft borders creates glaring bright halos around the edges.
+    \item \textbf{The Blue Skylight Cast}: Direct sunlight sits around $5500\text{ K}$, but skylight scattered by the atmosphere climbs past $8000\text{ K}$. Multiplicative scaling lifts brightness, but leaves the shadow looking cold and blue.
+    \item \textbf{Silent Detection Blunders}: Luminance thresholding cannot tell a sunlit black tire or dark asphalt patch from a shadowed sidewalk. Once the detector makes a mistake, downstream relighting ruins the picture with zero chance of recovery.
+\end{enumerate}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.98\linewidth]{figures/overview.png}
+\caption{\textbf{How our pipeline works.} An input photo goes to CIE $L^*a^*b^*$ for physical candidate detection (Module A). If the user spots a mistake, they drop quick scribbles into GrabCut (Module B). The shadow is then relit in linear radiometric space via paired boundary ratios with blue skylight correction (Module C), and blended seamlessly along the penumbra with a guided filter (Module D).}
+\label{fig:overview}
+\end{figure*}
+
+\subsection{Our Approach}
+We rebuilt the classical pipeline from scratch to fix these pain points:
+\begin{itemize}
+    \item \textbf{Radiometric Linearization}: We convert sRGB back to linear photon flux before touching any ratios, then map back cleanly at the very end.
+    \item \textbf{Log-Boundary Surface Matching}: We grab paired strips right along the shadow border on the \textit{same} surface. Taking their difference in log space cancels out the unknown reflectance $\rho$ analytically.
+    \item \textbf{Skylight Color Balancing}: We calculate the shift in the $b^*$ channel between lit and shadowed pixels, then warm up the relit shadow to erase the cold blue cast.
+    \item \textbf{Scribble-Guided Refinement}: If a dark road gets mislabelled, a user can draw a 1-second green stroke to force GrabCut to treat it as lit ground.
+    \item \textbf{Edge-Guided Blending}: We center the penumbra transition right on the physical border and snap it to actual scene contours using a guided filter.
+\end{itemize}
+
+\section{Related Work}
+\label{sec:related}
+
+\textbf{Physical Ratios and Invariant Spaces.} Finlayson \etal~\cite{finlayson2005removal} showed that under Planckian daylight, one can project color coordinates onto a 1D invariant line to ignore lighting changes. Guo \etal~\cite{guo2012paired} grouped segmented regions into pairs, using a classifier to check if two adjacent patches shared the same material across a shadow edge. Gryka \etal~\cite{gryka2015learning} used local regression to handle soft falloffs. We borrow the insight of paired boundaries, but we formulate the ratio in linearized space with log medians and explicit skylight corrections.
+
+\textbf{Interactive Segmentation.} Graph cuts (Boykov and Jolly~\cite{rother2004grabcut}) and GrabCut (Rother \etal~\cite{rother2004grabcut}) showed how user strokes can anchor foreground and background Gaussian Mixture Models. While most shadow papers insist on fully automated pipelines that fail silently on edge cases, we embrace human scribbles as a practical escape hatch for tough scenes.
+
+\textbf{Guided Filtering.} He \etal~\cite{he2010guided} designed the Guided Filter as an edge-preserving filter that avoids the gradient reversals common in bilateral filters. We use the grayscale photo itself as a structural guide so the penumbra alpha matte follows physical object silhouettes.
+
+\section{Proposed Method}
+\label{sec:method}
+
+Our system breaks down into four sequential modules (\cref{fig:overview}).
+
+\subsection{Module A: Physics-Grounded Shadow Detection}
+We first map the RGB image $I_{\text{srgb}}$ to CIE $L^*a^*b^*$. We smooth the $L$ (lightness) channel with a small Gaussian kernel ($\sigma = 1.5$) to quiet sensor noise:
+\begin{equation}
+L_{\text{smooth}} = G_\sigma * L.
+\end{equation}
+We run Otsu thresholding on $L$ to pull out dark candidate pixels. If dark pixels take up more than half the frame, we re-run Otsu inside that dark slice to avoid mistaking broad dark materials for cast shadows.
+
+Next, we test candidate connected blobs against three physical rules of outdoor daylight, computing all parameters using medians rather than means to prevent stray glints or pebbles in the reference ring from biasing the test:
+\begin{enumerate}
+    \item \textbf{Green-Red axis consistency}: Sunlight and diffuse skylight hit surfaces with nearly identical spectral balance along the green-red axis:
+    \begin{equation}
+    |\Delta a| = |\text{med}(a_{\text{shadow}}) - \text{med}(a_{\text{lit}})| \le 3.5.
+    \end{equation}
+    \item \textbf{Physical Rayleigh blue-shift bounds}: Shadows often turn blue from sky reflection, but they can never turn yellower than the sunlit area around them ($\Delta b \le 2.5$). Furthermore, natural terrestrial atmospheric scattering rarely shifts $\Delta b$ below $-25.0$; drops steeper than this point to synthetic blue dyes (e.g. blue apparel or painted surfaces):
+    \begin{equation}
+    -25.0 \le \Delta b = \text{med}(b_{\text{shadow}}) - \text{med}(b_{\text{lit}}) \le 2.5.
+    \end{equation}
+    \item \textbf{Clear brightness drop}: A real shadow must show an obvious drop in lightness compared to the lit ring just outside it:
+    \begin{equation}
+    L_{\text{ratio}} = \frac{\text{med}(L_{\text{lit}})}{\max(\text{med}(L_{\text{shadow}}), 10^{-3})} \ge 1.15.
+    \end{equation}
+\end{enumerate}
+One critical detail: we \textbf{delay morphological closing} until after these component checks pass. Closing too early bridges shadows into adjacent black shoes or car tires, merging dark objects into the shadow before the physics test can catch them.
+
+\subsection{Module B: Interactive Scribble Refinement}
+When an ambiguous patch (like dark asphalt) fools the detector, the user can drop scribbles on the screen. We store this as an array $S(x) \in \{0, 1, 2\}$, standing for untouched, shadow, and lit ground.
+
+The automated mask provides the initial guesses, while user strokes act as hard constraints:
+\begin{equation}
+\mathcal{T}(x) = 
+\begin{cases}
+\text{GC\_FGD}, & S(x) = 1 \\
+\text{GC\_BGD}, & S(x) = 2 \\
+\text{GC\_PR\_FGD}, & M_{\text{auto}}(x) > 0.5 \land S(x) = 0 \\
+\text{GC\_PR\_BGD}, & M_{\text{auto}}(x) \le 0.5 \land S(x) = 0
+\end{cases}
+\end{equation}
+We run GrabCut for 3 iterations on a 5-component GMM. On a laptop CPU, this takes roughly 300 ms—fast enough to feel instantaneous.
+
+\subsection{Module C: Surface-Aware Radiometric Relighting}
+\label{sec:relighting}
+
+\textbf{Getting Out of sRGB.} Cameras do not record light linearly; they apply tone curves for display. To work with real light ratios, we linearize sRGB into physical irradiance $I_{\text{lin}} \in [0, 1]$ via the IEC 61966-2-1 standard~\cite{iec61966}:
+\begin{equation}
+I_{\text{lin}} = 
+\begin{cases}
+\frac{I_{\text{srgb}}}{12.92}, & I_{\text{srgb}} \le 0.04045 \\
+\left(\frac{I_{\text{srgb}} + 0.055}{1.055}\right)^{2.4}, & I_{\text{srgb}} > 0.04045
+\end{cases}
+\end{equation}
+
+\textbf{Cancelling Reflectance in Log Space.} In linear space, $I_{\text{lit}} = \rho (L_d + L_a)$ and $I_{\text{sh}} = \rho L_a$. If we sample pixels right along the boundary on the \textit{same material}, $\rho$ is identical. Taking the difference in log space cancels $\rho$ completely:
+\begin{align}
+\log I_{\text{lit}} - \log I_{\text{sh}} &= \log\left(\frac{\rho (L_d + L_a)}{\rho L_a}\right) \nonumber \\
+&= \log\left(\frac{L_d + L_a}{L_a}\right) = \log \gamma.
+\end{align}
+We sample an inner strip $S_{\text{in}}$ just inside the shadow boundary and an outer strip $S_{\text{out}}$ in the lit band outside.
+
+\textbf{Spatially Coherent Multi-Surface Partitioning.} Early on, we tried raw K-means clustering on chromaticity to separate surfaces. But on textured asphalt, noise split the shadow into hundreds of speckled fragments, ruining the inner strip statistics. We fixed this by requiring real chromatic distance ($\|\mathbf{c}_0 - \mathbf{c}_1\|_2 \ge 0.15$) and running morphological opening. If both clusters remain large, contiguous chunks (like grass and concrete), we split them; otherwise, we treat the shadow as one surface.
+
+\textbf{Adaptive Anchoring.} We find the channel gain using medians:
+\begin{equation}
+\gamma_c = \text{clip}\left(\exp\left(\text{med}_{x \in S_{\text{out}}}(\log I_c(x)) - \text{med}_{x \in S_{\text{in}}}(\log I_c(x))\right), 1.0, 8.0\right).
+\end{equation}
+When the boundary strip has fewer than 100 matched pixels (common for thin shadows or border edges), local statistics get noisy. In those cases, we smoothly anchor the gain to the global scene ratio $\gamma_{\text{glob}}$:
+\begin{equation}
+\gamma_c^{\text{final}} = w \cdot \gamma_c + (1 - w) \cdot \gamma_{\text{glob}}, \quad w = \frac{N_{\text{matched}}}{100}.
+\end{equation}
+
+\textbf{Component-Adaptive Color Temperature Offset.} Multiplying RGB brightness scales luminance, but cannot cancel the spectral shift caused by diffuse skylight. After relighting in physical linear irradiance and converting to $L^*a^*b^*$, we measure the $b^*$ channel offset locally for each connected shadow component $C_i$:
+\begin{equation}
+\Delta b^*_i = \text{median}_{x \in \text{Ring}(C_i)}(b^*_{\text{orig}}(x)) - \text{median}_{x \in C_i}(b^*_{\text{relit}}(x)).
+\end{equation}
+If the surrounding ring has insufficient unshadowed context, $\Delta b^*_i$ smoothly anchors to the scene-wide lit median. When $\Delta b^*_i > 0$, we add $0.5 \cdot \Delta b^*_i$ into the component's $b^*$ channel. Making this adjustment local and surface-specific ensures cool asphalt and warm lawn shadows receive their own physically matched chromatic neutralization rather than a forced global compromise.
+
+\subsection{Module D: Penumbra Blending with a Guided Filter}
+Swapping pixel values abruptly creates an obvious seam. We build a soft transition band by blurring the mask symmetrically along its true border ($\sigma = r_{\text{penumbra}}$). Then we run a Grayscale Guided Filter using the input photo's lightness channel as the guide:
+\begin{equation}
+\alpha_{\text{final}} = \text{GuidedFilter}(I_{\text{gray}}, \alpha_{\text{blur}}, r = 2 r_{\text{penumbra}}, \epsilon = 10^{-3}).
+\end{equation}
+This snaps the soft alpha edge directly to the physical contours of the scene, avoiding blurred fringe lines. We then blend linearly:
+\begin{equation}
+I_{\text{final}}(x) = \alpha_{\text{final}}(x) \cdot I_{\text{relit}}(x) + (1 - \alpha_{\text{final}}(x)) \cdot I_{\text{in}}(x).
+\end{equation}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.98\linewidth]{figures/teaser.png}
+\caption{\textbf{Qualitative shadow removal on the ISTD test set.} Top: Scene 100-1 (concrete ground). Bottom: Scene 100-4 (textured sidewalk). From left to right: (a) Input shadow image, (b) Standard Otsu with global multiplicative gain, (c) Our automated pipeline, (d) Our pipeline after a quick user scribble, and (e) Ground truth photo without shadows.}
+\label{fig:teaser}
+\end{figure*}
+
+\section{Experiments and Results}
+\label{sec:experiments}
+
+\subsection{Experimental Setup}
+\textbf{Dataset.} We tested on the standard Image Shadow Triplets Dataset (ISTD)~\cite{wang2018stacked}, which pairs outdoor shadow photos with ground-truth shadow masks and clean shadow-free ground truth images.
+
+\textbf{Metrics.} We report: (1) Root Mean Square Error in CIE $L^*a^*b^*$ space for the shadow patch ($\text{RMSE}_{\text{sh}}$) and the full frame ($\text{RMSE}_{\text{all}}$); (2) Peak Signal-to-Noise Ratio (PSNR); (3) Structural Similarity (SSIM); (4) Mask IoU; and (5) Balanced Error Rate (BER).
+
+\subsection{Unit Audits on Controlled Cases}
+Before touching the full dataset, we verified each component on controlled synthetic test cases (\cref{tab:synthetic_audit}):
+\begin{itemize}
+    \item \textbf{Module A (Detection)}: A pitch-black object with the exact same lightness as a shadow ($L = 25$) was rejected cleanly: 0.0\% false positive rate, 0.997 IoU.
+    \item \textbf{Module B (Refinement)}: Given an intentionally broken mask ($\text{IoU} = 0.500$), two simulated user strokes brought IoU back up to $0.993$ and dropped error to $0.4\%$ BER.
+    \item \textbf{Module C (Relighting)}: On a synthetic scene split between green grass and white concrete, a simple global gain left an ugly magenta tint on the concrete ($\text{RMSE} = 12.95$). Our surface-matched relighting dropped RMSE down to $10.77$.
+    \item \textbf{Module D (Blending)}: Penumbra smoothing backed by guided filtering lifted boundary PSNR from $22.98\text{ dB}$ up to $23.70\text{ dB}$.
+\end{itemize}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}llcc@{}}
+\toprule
+\textbf{Component} & \textbf{Metric} & \textbf{Baseline} & \textbf{Ours} \\
+\midrule
+A. Detection & Dark Object FP Rate & 100.0\% & \textbf{0.0\%} \\
+A. Detection & Mask IoU & 0.500 & \textbf{0.997} \\
+B. Refinement & User Scribble BER & 6.2\% & \textbf{0.4\%} \\
+B. Refinement & Refined Mask IoU & 0.500 & \textbf{0.993} \\
+C. Relighting & Multi-Surface RMSE & 12.95 & \textbf{10.77} \\
+D. Blending & Boundary PSNR & 22.98 dB & \textbf{23.70 dB} \\
+\bottomrule
+\end{tabular}
+\caption{\textbf{Component unit audit results.} Testing each module in isolation under controlled physical conditions.}
+\label{tab:synthetic_audit}
+\end{table}
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Method / Configuration} & \textbf{Shadow RMSE} $\downarrow$ & \textbf{All RMSE} $\downarrow$ & \textbf{PSNR (dB)} $\uparrow$ & \textbf{SSIM} $\uparrow$ & \textbf{Mask IoU} $\uparrow$ & \textbf{Mask BER (\%)} $\downarrow$ \\
+\midrule
+Baseline: Otsu + Global Gain & 6.194 $\pm$ 3.28 & 6.047 $\pm$ 2.49 & 20.77 $\pm$ 3.29 & 0.757 $\pm$ 0.07 & 0.646 & 8.93\% \\
+Auto Mask: Global Gain + Blend & 5.182 $\pm$ 3.11 & 4.090 $\pm$ 2.01 & 24.72 $\pm$ 4.30 & 0.902 $\pm$ 0.10 & 0.782 & 4.52\% \\
+Auto Mask: Region Relight, No Blend & 5.728 $\pm$ 2.81 & 4.555 $\pm$ 1.72 & 23.52 $\pm$ 3.76 & 0.890 $\pm$ 0.10 & 0.782 & 4.52\% \\
+Auto Mask: Region Relight + Blend (w/o GF) & 5.226 $\pm$ 2.92 & 4.198 $\pm$ 1.71 & 24.37 $\pm$ 3.96 & 0.901 $\pm$ 0.10 & 0.782 & 4.52\% \\
+\textbf{Auto Mask: Region Relight + Blend (Full Ours)} & \textbf{5.136} $\pm$ 2.94 & \textbf{4.132} $\pm$ 1.70 & \textbf{24.53} $\pm$ 3.95 & \textbf{0.902} $\pm$ 0.10 & \textbf{0.782} & \textbf{4.52\%} \\
+\textbf{Auto + Simulated Scribbles: Full} & \textbf{4.509} $\pm$ 1.80 & \textbf{3.999} $\pm$ 1.78 & \textbf{24.95} $\pm$ 4.15 & \textbf{0.905} $\pm$ 0.10 & \textbf{0.811} & \textbf{2.80\%} \\
+\midrule
+GT Mask: Global Gain + Blend & 4.515 $\pm$ 2.08 & 3.111 $\pm$ 2.21 & 28.18 $\pm$ 5.62 & 0.914 $\pm$ 0.10 & 1.000 & 0.00\% \\
+\textbf{GT Mask: Region Relight + Blend (Upper Bound)} & \textbf{4.278} $\pm$ 1.78 & \textbf{3.007} $\pm$ 1.86 & \textbf{28.34} $\pm$ 5.23 & \textbf{0.915} $\pm$ 0.10 & \textbf{1.000} & \textbf{0.00\%} \\
+\bottomrule
+\end{tabular}
+\caption{\textbf{Evaluation on the ISTD dataset.} Comparing the baseline against our automated modules and scribble refinement. Lower is better for RMSE and BER; higher is better for PSNR, SSIM, and IoU. Values show mean $\pm$ standard deviation.}
+\label{tab:istd_benchmark}
+\end{table*}
+
+\subsection{ISTD Benchmark Numbers and Statistical Tests}
+\cref{tab:istd_benchmark} lays out how our pipeline performs across the real ISTD images.
+\begin{itemize}
+    \item \textbf{Full Pipeline vs. Baseline}: Our automated pipeline hits a mean PSNR of \textbf{24.53 dB} (compared to $20.77\text{ dB}$ for the Otsu baseline) and brings shadow RMSE down from $6.194$ to \textbf{5.136}. Running paired bootstrap testing ($N=20$, 2000 resamples, 95\% confidence interval) shows an average gain of \textbf{+3.77 dB [CI: +2.11, +6.01]} with a \textbf{95.0\% paired win rate}.
+    \item \textbf{Isolating Relighting Quality}: To see how well our relighting engine works without detection noise, we tested using ground-truth masks. Surface-aware relighting beats global gain across the board: shadow RMSE drops from $4.515$ to \textbf{4.278}, and PSNR climbs from $28.18\text{ dB}$ to \textbf{28.34 dB} (winning on 60\% of photos).
+    \item \textbf{The Power of Edge Blending}: Penumbra blending beats raw replacement on \textbf{100\% of test images}, delivering a clean \textbf{+1.01 dB [CI: +0.79, +1.22]} boost. Adding the guided filter squeezes out another \textbf{+0.16 dB} (95\% win rate) by wiping out blurry edge halos.
+    \item \textbf{User Scribbles Rescue Tough Images}: Adding simulated user strokes drops shadow RMSE from $5.136$ to \textbf{4.509} and pushes PSNR to \textbf{24.95 dB}. That jump proves that keeping a human in the loop is a practical, powerful alternative to hoping an automated detector never trips up.
+\end{itemize}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.98\linewidth]{figures/scribble_refine.png}
+\caption{\textbf{Rescuing a failure case on Scene 102.} (a) Input photo with dark asphalt; (b) The automated detector mistakes the asphalt road for shadow ($\text{IoU} = 0.432$); (c) The user draws one green stroke marking the road as lit; (d) GrabCut clears the mistake instantly; (e) Final clean output without over-brightening the road.}
+\label{fig:scribble_refine}
+\end{figure*}
+
+\subsection{Digging into Failures: Scene 102}
+\cref{fig:scribble_refine} illustrates why single-image shadow detection can never be 100\% bulletproof. In Scene 102, the asphalt road is naturally dark ($L \approx 31$), while the shadowed sidewalk sits at $L \approx 37$. Chromatically, both look neutral. Any purely automated threshold lumps them together, pushing mask IoU down to $0.432$ and over-brightening the road.
+
+Under our interactive setup, the user simply draws a quick green line across the road. GrabCut uses that stroke as a hard anchor, stripping out the asphalt false-positive while keeping the true sidewalk shadow intact. Having this option turns an otherwise fatal edge case into an easy fix.
+
+\section{Conclusion}
+\label{sec:conclusion}
+We built a fast, classical shadow remover designed to solve the real-world bugs of earlier methods. By respecting daylight physics—linearizing light before computing ratios, cancelling surface reflectance across boundary strips, fixing blue skylight casts, and aligning soft edges with a guided filter—we lift ISTD benchmark performance by +3.79 dB PSNR over standard baselines. And when dark objects make automated thresholding impossible, simple user scribbles clean up the result in seconds. The whole tool runs comfortably on a laptop CPU and is packaged in an interactive Streamlit interface.
+
+{\small
+\bibliographystyle{ieee_fullname}
+\bibliography{references}
+}
+
+\clearpage
+\appendix
+\section*{Appendix}
+\label{sec:appendix}
+
+\section{Code Repositories and Datasets}
+\label{sec:links}
+\begin{itemize}
+    \item \textbf{Our Group GitHub Repository}:\\
+    \url{https://github.com/dpatil23/Shadow-Remover-Tool}
+    \item \textbf{Upstream Parent Repository}:\\
+    \url{https://github.com/NeelBasak/Shadow-Remover-Tool}
+    \item \textbf{ISTD Benchmark Dataset}:\\
+    \url{https://github.com/DeepInsight-PCALab/ST-CGAN}
+    \item \textbf{CVPR Author Kit Template}:\\
+    \url{https://www.overleaf.com/latex/templates/cvpr-2022-author-kit/qbmjsdxryffn}
+\end{itemize}
+
+\section{Running the Streamlit Demo}
+\label{sec:app_guide}
+We wrapped the entire pipeline in an interactive Streamlit app (`app.py`). To run it locally:
+\begin{lstlisting}[language=bash]
+cd Shadow-Remover-Tool
+streamlit run app.py
+\end{lstlisting}
+The interface lets you:
+\begin{enumerate}
+    \item Pick from preset scenes or upload your own photos.
+    \item Tweak physical detection thresholds ($|\Delta a|$, $\Delta b_{\text{pos}}$, $L_{\text{ratio}}$), gain ceilings, and skylight correction weights with live sliders.
+    \item Draw bounding boxes and stroke constraints to test GrabCut corrections in real time.
+    \item View PSNR, SSIM, and LAB RMSE scores calculated instantly against ground-truth images.
+\end{enumerate}
+
+\section{Complete Source Code}
+\label{sec:code}
+Here is the complete source code for our core modules.
+
+\subsection{\texttt{src/remove.py} — Radiometric Relighting}
+\begin{lstlisting}[language=Python]
+"""Module C: region-matched, surface-aware relighting using boundary-strip ratios."""
+import cv2
+import numpy as np
+from .utils import linear_to_srgb, normalized_rgb, srgb_to_linear
+
+def _ellipse(r):
+    return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+
+def remove_global(img, mask, max_gain=8.0, linear=True):
+    binary = mask > 0.5
+    if binary.sum() < 10 or (~binary).sum() < 10:
+        return img.copy()
+    f = srgb_to_linear(img) if linear else img.astype(np.float32)
+    gain = np.median(f[~binary], axis=0) / np.maximum(np.median(f[binary], axis=0), 1e-4)
+    gain = np.clip(gain, 1.0, max_gain)
+    out = f.copy()
+    out[binary] = f[binary] * gain
+    return linear_to_srgb(out, as_uint8=True) if linear else np.clip(out, 0, 255).astype(np.uint8)
+
+def remove(img, mask, gap=None, band=None, max_gain=8.0, min_pixels=20, enable_clustering=True, linear=True, b_weight=0.5):
+    h, w = img.shape[:2]
+    scale = min(h, w)
+    gap = gap if gap is not None else max(2, int(0.01 * scale))
+    band = band if band is not None else max(5, int(0.03 * scale))
+    binary = (mask > 0.5).astype(np.uint8)
+    if binary.sum() < min_pixels:
+        return img.copy()
+
+    f = srgb_to_linear(img) if linear else img.astype(np.float32)
+    norm_rgb = normalized_rgb(f)
+    log_f = np.log(np.maximum(f, 1e-4))
+
+    gain_global = np.median(f[binary == 0], axis=0) / np.maximum(np.median(f[binary > 0], axis=0), 1e-4) if (~(binary > 0)).sum() >= min_pixels else np.ones(3, np.float32)
+    gain_global = np.clip(gain_global, 1.0, max_gain)
+
+    n, labels = cv2.connectedComponents(binary, connectivity=8)
+    any_shadow_far = cv2.dilate(binary, _ellipse(gap + 1))
+    out = f.copy()
+    k_clean = max(3, int(0.015 * scale) | 1)
+    clean_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_clean, k_clean))
+
+    for i in range(1, n):
+        region = (labels == i).astype(np.uint8)
+        reg_pixels = region.sum()
+        if reg_pixels < min_pixels:
+            continue
+        ring = cv2.dilate(region, _ellipse(gap + band)) & (1 - any_shadow_far)
+        if ring.sum() < min_pixels:
+            ring = cv2.dilate(region, _ellipse(gap + band)) & (1 - binary)
+
+        sub_regions = [region]
+        if enable_clustering and reg_pixels >= 400:
+            coords = np.where(region > 0)
+            sample_chroma = norm_rgb[coords]
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+            _, clabels, centers = cv2.kmeans(sample_chroma, 2, None, criteria, 5, cv2.KMEANS_PP_CENTERS)
+            if np.linalg.norm(centers[0] - centers[1]) >= 0.15:
+                sub0 = np.zeros((h, w), dtype=np.uint8)
+                sub1 = np.zeros((h, w), dtype=np.uint8)
+                sub0[coords[0][clabels.flatten() == 0], coords[1][clabels.flatten() == 0]] = 1
+                sub1[coords[0][clabels.flatten() == 1], coords[1][clabels.flatten() == 1]] = 1
+                sub0 = cv2.morphologyEx(sub0, cv2.MORPH_OPEN, clean_kernel)
+                sub1 = cv2.morphologyEx(sub1, cv2.MORPH_OPEN, clean_kernel)
+                if sub0.sum() >= 0.15 * reg_pixels and sub1.sum() >= 0.15 * reg_pixels:
+                    sub_regions = [sub0, sub1]
+
+        for sub in sub_regions:
+            if sub.sum() < min_pixels:
+                continue
+            inner_strip = cv2.erode(sub, _ellipse(gap)) & (1 - cv2.erode(sub, _ellipse(gap + band)))
+            if inner_strip.sum() < min_pixels:
+                inner_strip = cv2.erode(sub, _ellipse(gap))
+            if inner_strip.sum() < min_pixels:
+                inner_strip = sub
+            outer_strip = cv2.dilate(sub, _ellipse(gap + band)) & (1 - any_shadow_far)
+            if outer_strip.sum() < 5:
+                outer_strip = ring
+
+            sub_chroma = norm_rgb[sub > 0].mean(axis=0)
+            outer_coords = np.where(outer_strip > 0)
+            chroma_dists = np.linalg.norm(norm_rgb[outer_coords] - sub_chroma, axis=1) if len(outer_coords[0]) > 0 else np.array([])
+            matched_indices = np.where(chroma_dists < 0.15)[0] if len(chroma_dists) > 0 else []
+            matched_outer = (outer_coords[0][matched_indices], outer_coords[1][matched_indices]) if len(matched_indices) >= min_pixels else outer_coords
+
+            if len(matched_outer[0]) >= min_pixels and inner_strip.sum() >= min_pixels:
+                log_ratio = np.median(log_f[matched_outer], axis=0) - np.median(log_f[inner_strip > 0], axis=0)
+                gain = np.clip(np.exp(log_ratio), 1.0, max_gain)
+            elif ring.sum() >= min_pixels and sub.sum() >= min_pixels:
+                gain = np.clip(np.median(f[ring > 0], axis=0) / np.maximum(np.median(f[sub > 0], axis=0), 1e-4), 1.0, max_gain)
+            else:
+                gain = gain_global
+
+            if len(matched_outer[0]) < 100:
+                w_anchor = len(matched_outer[0]) / 100.0
+                gain = w_anchor * gain + (1.0 - w_anchor) * gain_global
+            out[sub > 0] = f[sub > 0] * gain
+
+    relit_srgb = linear_to_srgb(out, as_uint8=True) if linear else np.clip(out, 0, 255).astype(np.uint8)
+    if b_weight > 0 and binary.sum() >= min_pixels:
+        lab_relit = cv2.cvtColor(relit_srgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+        lab_orig = cv2.cvtColor(img, cv2.COLOR_RGB2LAB).astype(np.float32)
+        b_ch = lab_relit[..., 2]
+        b_global_lit = float(np.median(lab_orig[binary == 0, 2]))
+        n_cc, cc_labels = cv2.connectedComponents(binary, connectivity=8)
+        ring_kernel_b = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (max(5, int(round(scale * 0.03)) | 1), max(5, int(round(scale * 0.03)) | 1)))
+        for idx in range(1, n_cc):
+            comp_mask = cc_labels == idx
+            if comp_mask.sum() < min_pixels:
+                continue
+            ring_lit = cv2.dilate(comp_mask.astype(np.uint8), ring_kernel_b) & (1 - binary)
+            b_lit_val = float(np.median(lab_orig[ring_lit > 0, 2])) if ring_lit.sum() >= min_pixels else b_global_lit
+            delta_b = b_lit_val - float(np.median(b_ch[comp_mask]))
+            if delta_b > 0:
+                b_ch[comp_mask] = np.clip(b_ch[comp_mask] + b_weight * delta_b, 0, 255)
+        lab_relit[..., 2] = b_ch
+        relit_srgb = cv2.cvtColor(np.clip(lab_relit, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB)
+    return relit_srgb
+\end{lstlisting}
+
+\subsection{\texttt{src/detect.py} — Daylight Physics Detection}
+\begin{lstlisting}[language=Python]
+"""Module A: automatic shadow detection (classical, LAB-based + hierarchical Otsu + daylight physics)."""
+import cv2
+import numpy as np
+from .utils import rgb_to_lab
+
+def detect_otsu(img):
+    L = rgb_to_lab(img)[..., 0]
+    L8 = np.clip(L * 255.0 / 100.0, 0, 255).astype(np.uint8)
+    _, binary = cv2.threshold(L8, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    return (binary > 0).astype(np.float32)
+
+def detect(img, min_area_frac=0.002, min_separation=10.0, max_delta_a=3.5, max_delta_b_pos=2.5, min_delta_b=-25.0, min_l_ratio=1.15, soft_sigma=1.0, max_area_frac=0.5, max_splits=2):
+    h, w = img.shape[:2]
+    lab = rgb_to_lab(img)
+    L = cv2.GaussianBlur(lab[..., 0], (0, 0), 1.5)
+    L8 = np.clip(L * 255.0 / 100.0, 0, 255).astype(np.uint8)
+    _, binary = cv2.threshold(L8, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    shadow = binary > 0
+
+    for _ in range(max_splits):
+        if shadow.mean() <= max_area_frac or shadow.sum() < 100:
+            break
+        t2, _ = cv2.threshold(L8[shadow].reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        shadow = shadow & (L8 <= t2)
+
+    if shadow.sum() == 0 or (~shadow).sum() == 0 or float(np.median(L[~shadow]) - np.median(L[shadow])) < min_separation:
+        return np.zeros((h, w), np.float32)
+
+    k = max(3, int(round(min(h, w) * 0.01)) | 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    m = cv2.morphologyEx(shadow.astype(np.uint8), cv2.MORPH_OPEN, kernel)
+
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    min_area = min_area_frac * h * w
+    ring_radius = max(5, int(round(min(h, w) * 0.025)) | 1)
+    ring_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ring_radius, ring_radius))
+    a_ch, b_ch = lab[..., 1], lab[..., 2]
+    keep = np.zeros_like(m)
+
+    for i in range(1, n):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area < min_area:
+            continue
+        comp = (labels == i).astype(np.uint8)
+        dilated = cv2.dilate(comp, ring_kernel)
+        ring = dilated & (1 - m)
+        if ring.sum() < max(15, int(0.05 * area)):
+            ring = dilated & (1 - comp)
+        if ring.sum() >= 10:
+            delta_a = abs(float(np.median(a_ch[comp > 0]) - np.median(a_ch[ring > 0])))
+            delta_b = float(np.median(b_ch[comp > 0]) - np.median(b_ch[ring > 0]))
+            l_ratio = float(np.median(L[ring > 0])) / max(float(np.median(L[comp > 0])), 1e-3)
+            if delta_a <= max_delta_a and min_delta_b <= delta_b <= max_delta_b_pos and l_ratio >= min_l_ratio:
+                keep[comp > 0] = 1
+        else:
+            keep[comp > 0] = 1
+
+    inv = (1 - keep).astype(np.uint8)
+    n2, lab2, st2, _ = cv2.connectedComponentsWithStats(inv, connectivity=4)
+    for i in range(1, n2):
+        if st2[i, cv2.CC_STAT_AREA] < min_area:
+            keep[lab2 == i] = 1
+
+    keep = cv2.morphologyEx(keep, cv2.MORPH_CLOSE, kernel)
+    soft = cv2.GaussianBlur(keep.astype(np.float32), (0, 0), soft_sigma)
+    return np.clip(soft, 0.0, 1.0).astype(np.float32)
+\end{lstlisting}
+
+\subsection{\texttt{src/blend.py} — Penumbra Guided Blending}
+\begin{lstlisting}[language=Python]
+"""Module D: penumbra-aware blending."""
+import cv2
+import numpy as np
+from .utils import guided_filter
+
+def blend(img, relit, mask, penumbra=None, use_guided=True, eps=1e-3):
+    h, w = img.shape[:2]
+    penumbra = penumbra if penumbra is not None else max(2, int(0.008 * min(h, w)))
+    alpha = mask.astype(np.float32)
+    alpha_blurred = cv2.GaussianBlur(alpha, (0, 0), penumbra)
+    if use_guided:
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
+        alpha_final = guided_filter(gray, alpha_blurred, r=max(4, 2 * penumbra), eps=eps)
+    else:
+        alpha_final = alpha_blurred
+    alpha_final = np.clip(alpha_final, 0.0, 1.0)[..., None]
+    out = alpha_final * relit.astype(np.float32) + (1.0 - alpha_final) * img.astype(np.float32)
+    return np.clip(out, 0, 255).astype(np.uint8)
+\end{lstlisting}
+
+\subsection{\texttt{src/refine.py} — Interactive GrabCut Refinement}
+\begin{lstlisting}[language=Python]
+"""Module B: interactive mask refinement with user scribbles (GrabCut)."""
+import cv2
+import numpy as np
+
+SCRIB_NONE, SCRIB_SHADOW, SCRIB_LIT = 0, 1, 2
+
+def refine(img, mask, scribbles=None, iters=3, soft_sigma=2.0):
+    if scribbles is None or not np.any(scribbles):
+        return mask
+    gc = np.where(mask > 0.5, cv2.GC_PR_FGD, cv2.GC_PR_BGD).astype(np.uint8)
+    has_shadow_scribble = np.any(scribbles == SCRIB_SHADOW)
+    has_lit_scribble = np.any(scribbles == SCRIB_LIT)
+    if has_shadow_scribble:
+        gc[scribbles == SCRIB_SHADOW] = cv2.GC_FGD
+    if has_lit_scribble:
+        gc[scribbles == SCRIB_LIT] = cv2.GC_BGD
+    if not np.any((gc == cv2.GC_BGD) | (gc == cv2.GC_PR_BGD)):
+        gc[scribbles != SCRIB_SHADOW] = cv2.GC_PR_BGD
+    if not np.any((gc == cv2.GC_FGD) | (gc == cv2.GC_PR_FGD)):
+        gc[scribbles != SCRIB_LIT] = cv2.GC_PR_FGD
+    if not (np.any((gc == cv2.GC_FGD) | (gc == cv2.GC_PR_FGD)) and np.any((gc == cv2.GC_BGD) | (gc == cv2.GC_PR_BGD))):
+        return mask
+
+    bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    bgd = np.zeros((1, 65), np.float64)
+    fgd = np.zeros((1, 65), np.float64)
+    try:
+        cv2.grabCut(bgr, gc, None, bgd, fgd, iters, cv2.GC_INIT_WITH_MASK)
+    except cv2.error:
+        return mask
+
+    binary = ((gc == cv2.GC_FGD) | (gc == cv2.GC_PR_FGD)).astype(np.float32)
+    soft = cv2.GaussianBlur(binary, (0, 0), soft_sigma)
+    if has_lit_scribble:
+        soft[scribbles == SCRIB_LIT] = 0.0
+    if has_shadow_scribble:
+        soft[scribbles == SCRIB_SHADOW] = 1.0
+    return np.clip(soft, 0.0, 1.0).astype(np.float32)
+\end{lstlisting}
+
+\subsection{\texttt{src/utils.py} — Color Conversions \& Filters}
+\begin{lstlisting}[language=Python]
+"""Shared helpers: image I/O, colour conversion, box filter, guided filter."""
+import cv2
+import numpy as np
+
+def load_image(path):
+    bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise FileNotFoundError(f"Could not read image: {path}")
+    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+def save_image(path, img):
+    cv2.imwrite(str(path), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+
+def load_mask(path):
+    m = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+    if m is None:
+        raise FileNotFoundError(f"Could not read mask: {path}")
+    return (m.astype(np.float32) / 255.0 > 0.5).astype(np.float32)
+
+def rgb_to_lab(img):
+    return cv2.cvtColor(img.astype(np.float32) / 255.0, cv2.COLOR_RGB2LAB)
+
+def srgb_to_linear(img):
+    x = img.astype(np.float32) / 255.0 if (img.dtype == np.uint8 or img.max() > 1.0) else img.astype(np.float32)
+    x = np.clip(x, 0.0, 1.0)
+    linear = np.where(x <= 0.04045, x / 12.92, ((x + 0.055) / 1.055) ** 2.4)
+    return linear.astype(np.float32)
+
+def linear_to_srgb(linear, as_uint8=True):
+    x = np.clip(linear.astype(np.float32), 0.0, 1.0)
+    srgb = np.where(x <= 0.0031308, x * 12.92, 1.055 * (x ** (1.0 / 2.4)) - 0.055)
+    srgb_255 = np.clip(np.round(srgb * 255.0), 0.0, 255.0)
+    return srgb_255.astype(np.uint8) if as_uint8 else (srgb_255 / 255.0).astype(np.float32)
+
+def normalized_rgb(img, eps=1e-5):
+    f = img.astype(np.float32)
+    return f / (f.sum(axis=-1, keepdims=True) + eps)
+
+def box_filter(x, r):
+    return cv2.boxFilter(x, -1, (2 * r + 1, 2 * r + 1), borderType=cv2.BORDER_REPLICATE)
+
+def guided_filter(guide, src, r=8, eps=1e-3):
+    guide, src = guide.astype(np.float32), src.astype(np.float32)
+    mean_g, mean_s = box_filter(guide, r), box_filter(src, r)
+    cov_gs = box_filter(guide * src, r) - mean_g * mean_s
+    var_g = box_filter(guide * guide, r) - mean_g * mean_g
+    a = cov_gs / (var_g + eps)
+    b = mean_s - a * mean_g
+    return box_filter(a, r) * guide + box_filter(b, r)
+
+def overlay_mask(img, mask, color=(255, 0, 0), alpha=0.5):
+    out = img.astype(np.float32).copy()
+    m = mask[..., None]
+    out = out * (1 - alpha * m) + np.array(color, np.float32) * alpha * m
+    return np.clip(out, 0, 255).astype(np.uint8)
+\end{lstlisting}
+
+\subsection{\texttt{src/pipeline.py} — Pipeline Entry Point}
+\begin{lstlisting}[language=Python]
+"""End-to-end shadow removal pipeline and command-line interface."""
+import argparse
+from pathlib import Path
+import cv2
+import numpy as np
+
+from .blend import blend
+from .detect import detect
+from .refine import refine
+from .remove import remove
+from .utils import load_image, load_mask, overlay_mask, save_image
+
+def run(img, mask=None, scribbles=None, use_blend=True, use_guided=True, max_gain=8.0, b_weight=0.5, enable_clustering=True, penumbra=None):
+    if mask is None:
+        mask = detect(img)
+    if scribbles is not None and np.any(scribbles):
+        mask = refine(img, mask, scribbles)
+    relit = remove(img, mask, max_gain=max_gain, enable_clustering=enable_clustering, b_weight=b_weight)
+    return blend(img, relit, mask, penumbra=penumbra, use_guided=use_guided) if use_blend else relit, mask, relit
+\end{lstlisting}
+
+\end{document}

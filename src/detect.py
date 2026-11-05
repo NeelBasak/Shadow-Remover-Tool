@@ -35,6 +35,7 @@ def detect(
     min_separation=10.0,
     max_delta_a=3.5,
     max_delta_b_pos=2.5,
+    min_delta_b=-25.0,
     min_l_ratio=1.15,
     soft_sigma=1.0,
     max_area_frac=0.5,
@@ -52,6 +53,8 @@ def detect(
             In daylight, direct sun and skylight share the same green-red balance on a surface.
         max_delta_b_pos: maximum allowed positive shift in the Blue-Yellow 'b' channel.
             Shadows can shift blue (negative delta_b), but cannot be yellower than lit ground.
+        min_delta_b: minimum allowed shift in the Blue-Yellow 'b' channel.
+            Prevents deeply pigmented blue objects from being misclassified as shadows.
         min_l_ratio: minimum ratio (L_lit / L_shadow) required for a valid shadow.
         soft_sigma: Gaussian sigma used to soften the final mask.
         max_area_frac: if Otsu labels more than this fraction of the image as shadow,
@@ -116,14 +119,14 @@ def detect(
             ring = dilated & (1 - comp)
 
         if ring.sum() >= 10:
-            delta_a = abs(float(a_ch[comp > 0].mean() - a_ch[ring > 0].mean()))
-            delta_b_pos = float(b_ch[comp > 0].mean() - b_ch[ring > 0].mean())
-            L_in = float(L[comp > 0].mean())
-            L_out = float(L[ring > 0].mean())
+            delta_a = abs(float(np.median(a_ch[comp > 0]) - np.median(a_ch[ring > 0])))
+            delta_b = float(np.median(b_ch[comp > 0]) - np.median(b_ch[ring > 0]))
+            L_in = float(np.median(L[comp > 0]))
+            L_out = float(np.median(L[ring > 0]))
             l_ratio = L_out / max(L_in, 1e-3)
 
-            # Accept if a* is invariant, b* does not turn yellower, and luminance drops
-            if delta_a <= max_delta_a and delta_b_pos <= max_delta_b_pos and l_ratio >= min_l_ratio:
+            # Accept if a* is invariant, b* is within physical daylight bounds, and luminance drops
+            if delta_a <= max_delta_a and min_delta_b <= delta_b <= max_delta_b_pos and l_ratio >= min_l_ratio:
                 keep[comp > 0] = 1
         else:
             # Insufficient border context; preserve if area is significant

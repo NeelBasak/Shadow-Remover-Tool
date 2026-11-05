@@ -200,12 +200,29 @@ def remove(
         lab_relit = cv2.cvtColor(relit_srgb, cv2.COLOR_RGB2LAB).astype(np.float32)
         lab_orig = cv2.cvtColor(img, cv2.COLOR_RGB2LAB).astype(np.float32)
         b_ch = lab_relit[..., 2]
-        b_lit = np.median(lab_orig[binary == 0, 2])
-        b_shadow = np.median(b_ch[binary > 0])
-        delta_b = b_lit - b_shadow
-        if delta_b > 0:
-            b_ch[binary > 0] = np.clip(b_ch[binary > 0] + b_weight * delta_b, 0, 255)
-            lab_relit[..., 2] = b_ch
-            relit_srgb = cv2.cvtColor(np.clip(lab_relit, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB)
+        b_global_lit = float(np.median(lab_orig[binary == 0, 2]))
+
+        # Component-adaptive color temperature shift with global anchor
+        n_cc, cc_labels = cv2.connectedComponents(binary, connectivity=8)
+        k_ring = max(5, int(round(scale * 0.03)) | 1)
+        ring_kernel_b = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_ring, k_ring))
+
+        for idx in range(1, n_cc):
+            comp_mask = cc_labels == idx
+            if comp_mask.sum() < min_pixels:
+                continue
+            dil = cv2.dilate(comp_mask.astype(np.uint8), ring_kernel_b)
+            ring_lit = dil & (1 - binary)
+            if ring_lit.sum() >= min_pixels:
+                b_lit_val = float(np.median(lab_orig[ring_lit > 0, 2]))
+            else:
+                b_lit_val = b_global_lit
+            b_shadow_val = float(np.median(b_ch[comp_mask]))
+            delta_b = b_lit_val - b_shadow_val
+            if delta_b > 0:
+                b_ch[comp_mask] = np.clip(b_ch[comp_mask] + b_weight * delta_b, 0, 255)
+
+        lab_relit[..., 2] = b_ch
+        relit_srgb = cv2.cvtColor(np.clip(lab_relit, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB)
 
     return relit_srgb

@@ -17,6 +17,7 @@ Shadow-Remover-Tool/
 ├── PROGRESS.md               # Task tracker and contribution log
 ├── README.md                 # Project documentation and quickstart
 ├── SUGGESTIONS.md            # In-depth architectural analysis and experimental findings
+├── report/                   # CVPR 2022 LaTeX write-up, figures, bibtex, & Overleaf package
 ├── requirements.txt          # Python dependencies
 ├── src/
 │   ├── detect.py             # Module A: shadow detection (Otsu + chroma filtering)

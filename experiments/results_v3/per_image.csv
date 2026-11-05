@@ -1,0 +1,221 @@
+image,method,RMSE_LAB_shadow,RMSE_LAB_all,PSNR,SSIM,mask_IoU,mask_BER
+100-1.png,baseline: Otsu + global gain,6.1591,4.9339,21.8576,0.8438,0.9702,0.9894
+100-1.png,auto mask: global gain,6.1630,4.1673,23.4242,0.9324,0.9919,0.3679
+100-1.png,auto mask: global gain + blend,5.5857,3.8826,24.1814,0.9382,0.9919,0.3679
+100-1.png,"auto mask: region relight, no blend",5.6619,3.9536,24.2240,0.9355,0.9919,0.3679
+100-1.png,"auto mask: region relight, blend w/o guided filter",5.3510,3.7786,24.6395,0.9426,0.9919,0.3679
+100-1.png,auto mask: region relight + blend (full),5.3197,3.7630,24.6819,0.9427,0.9919,0.3679
+100-1.png,auto + simulated scribbles: full,5.0829,3.6400,24.9511,0.9419,0.9907,0.4266
+100-1.png,GT mask: global gain,6.4152,4.2511,23.1866,0.9323,1.0000,0.0000
+100-1.png,GT mask: global gain + blend,5.6969,3.9125,24.0997,0.9397,1.0000,0.0000
+100-1.png,"GT mask: region relight, no blend",5.7610,3.9623,24.0929,0.9346,1.0000,0.0000
+100-1.png,GT mask: region relight + blend,5.1444,3.6618,24.8998,0.9437,1.0000,0.0000
+100-2.png,baseline: Otsu + global gain,8.9539,8.3739,16.9260,0.7660,0.8571,6.6387
+100-2.png,auto mask: global gain,8.9929,7.9718,17.3558,0.8908,0.8774,5.8224
+100-2.png,auto mask: global gain + blend,8.4001,7.6438,17.7414,0.9025,0.8774,5.8224
+100-2.png,"auto mask: region relight, no blend",8.2216,7.6668,17.6420,0.8924,0.8774,5.8224
+100-2.png,"auto mask: region relight, blend w/o guided filter",7.8201,7.4101,17.9499,0.9059,0.8774,5.8224
+100-2.png,auto mask: region relight + blend (full),7.6822,7.3531,18.0281,0.9054,0.8774,5.8224
+100-2.png,auto + simulated scribbles: full,8.0870,7.5243,17.8778,0.9064,0.9176,3.8058
+100-2.png,GT mask: global gain,8.1959,7.6323,17.8454,0.9030,1.0000,0.0000
+100-2.png,GT mask: global gain + blend,7.7438,7.4532,18.0514,0.9081,1.0000,0.0000
+100-2.png,"GT mask: region relight, no blend",6.3702,6.9779,18.5543,0.9105,1.0000,0.0000
+100-2.png,GT mask: region relight + blend,5.9598,6.8140,18.7618,0.9166,1.0000,0.0000
+100-3.png,baseline: Otsu + global gain,8.0905,5.7594,20.4721,0.7535,0.8134,7.9106
+100-3.png,auto mask: global gain,7.9401,4.7407,22.1693,0.9154,0.8701,6.2759
+100-3.png,auto mask: global gain + blend,7.1894,4.3970,22.8343,0.9296,0.8701,6.2759
+100-3.png,"auto mask: region relight, no blend",8.1707,4.8538,21.9485,0.9123,0.8701,6.2759
+100-3.png,"auto mask: region relight, blend w/o guided filter",7.4445,4.5012,22.6044,0.9279,0.8701,6.2759
+100-3.png,auto mask: region relight + blend (full),7.3387,4.4554,22.6991,0.9278,0.8701,6.2759
+100-3.png,auto + simulated scribbles: full,5.2871,3.6786,24.8749,0.9371,0.9652,1.5875
+100-3.png,GT mask: global gain,6.5624,4.1476,23.4744,0.9270,1.0000,0.0000
+100-3.png,GT mask: global gain + blend,5.4215,3.7378,24.5900,0.9401,1.0000,0.0000
+100-3.png,"GT mask: region relight, no blend",6.4216,4.1166,23.6545,0.9266,1.0000,0.0000
+100-3.png,GT mask: region relight + blend,5.2423,3.6768,24.7811,0.9410,1.0000,0.0000
+100-4.png,baseline: Otsu + global gain,4.2556,4.6447,22.4198,0.7419,0.9058,1.8366
+100-4.png,auto mask: global gain,4.5805,2.8639,26.7093,0.9399,0.9821,0.6780
+100-4.png,auto mask: global gain + blend,3.2364,2.4267,28.2767,0.9516,0.9821,0.6780
+100-4.png,"auto mask: region relight, no blend",4.3507,2.8124,26.8130,0.9386,0.9821,0.6780
+100-4.png,"auto mask: region relight, blend w/o guided filter",3.1578,2.4074,28.2758,0.9513,0.9821,0.6780
+100-4.png,auto mask: region relight + blend (full),3.0633,2.3799,28.3995,0.9516,0.9821,0.6780
+100-4.png,auto + simulated scribbles: full,2.9942,2.2730,28.8890,0.9507,0.9752,1.1196
+100-4.png,GT mask: global gain,5.0656,2.8965,26.6138,0.9400,1.0000,0.0000
+100-4.png,GT mask: global gain + blend,3.1963,2.3049,28.8506,0.9538,1.0000,0.0000
+100-4.png,"GT mask: region relight, no blend",4.9386,2.8756,26.6058,0.9385,1.0000,0.0000
+100-4.png,GT mask: region relight + blend,3.0966,2.2777,28.8914,0.9536,1.0000,0.0000
+100-5.png,baseline: Otsu + global gain,12.2647,10.5498,14.6322,0.7693,0.0631,43.7668
+100-5.png,auto mask: global gain,4.2987,1.4218,33.9055,0.9756,0.9752,1.1986
+100-5.png,auto mask: global gain + blend,3.0015,1.2146,35.7522,0.9800,0.9752,1.1986
+100-5.png,"auto mask: region relight, no blend",4.2685,1.4367,33.9371,0.9741,0.9752,1.1986
+100-5.png,"auto mask: region relight, blend w/o guided filter",3.4661,1.2820,35.1065,0.9802,0.9752,1.1986
+100-5.png,auto mask: region relight + blend (full),3.4817,1.2853,35.0757,0.9802,0.9752,1.1986
+100-5.png,auto + simulated scribbles: full,3.7842,1.3462,34.4846,0.9789,0.9607,1.6575
+100-5.png,GT mask: global gain,5.4421,1.6173,32.3140,0.9741,1.0000,0.0000
+100-5.png,GT mask: global gain + blend,3.1792,1.2377,35.5277,0.9795,1.0000,0.0000
+100-5.png,"GT mask: region relight, no blend",5.3817,1.6249,32.4283,0.9725,1.0000,0.0000
+100-5.png,GT mask: region relight + blend,3.5350,1.2920,35.0730,0.9795,1.0000,0.0000
+100-6.png,baseline: Otsu + global gain,12.4612,5.3166,21.4647,0.7519,0.5611,16.5154
+100-6.png,auto mask: global gain,12.5147,4.1006,23.5938,0.9591,0.6513,16.3269
+100-6.png,auto mask: global gain + blend,12.4258,4.0563,23.6705,0.9644,0.6513,16.3269
+100-6.png,"auto mask: region relight, no blend",13.3180,4.3183,23.4044,0.9555,0.6513,16.3269
+100-6.png,"auto mask: region relight, blend w/o guided filter",13.1232,4.2485,23.5838,0.9626,0.6513,16.3269
+100-6.png,auto mask: region relight + blend (full),13.0958,4.2318,23.6323,0.9624,0.6513,16.3269
+100-6.png,auto + simulated scribbles: full,8.1182,2.6775,28.7139,0.9613,0.9531,1.9328
+100-6.png,GT mask: global gain,7.8394,2.6569,27.5986,0.9606,1.0000,0.0000
+100-6.png,GT mask: global gain + blend,7.1116,2.4721,28.3096,0.9659,1.0000,0.0000
+100-6.png,"GT mask: region relight, no blend",9.5008,3.1022,26.7676,0.9545,1.0000,0.0000
+100-6.png,GT mask: region relight + blend,8.3591,2.7935,28.1399,0.9605,1.0000,0.0000
+100-7.png,baseline: Otsu + global gain,10.9074,5.3143,21.3901,0.7107,0.5439,16.1145
+100-7.png,auto mask: global gain,12.0513,3.8705,24.3064,0.9637,0.6546,15.7504
+100-7.png,auto mask: global gain + blend,11.5438,3.7040,24.6159,0.9683,0.6546,15.7504
+100-7.png,"auto mask: region relight, no blend",12.4968,3.9978,24.2871,0.9619,0.6546,15.7504
+100-7.png,"auto mask: region relight, blend w/o guided filter",12.3546,3.9330,24.4563,0.9683,0.6546,15.7504
+100-7.png,auto mask: region relight + blend (full),12.3097,3.9169,24.5108,0.9681,0.6546,15.7504
+100-7.png,auto + simulated scribbles: full,7.6983,2.4975,28.9344,0.9698,0.9092,3.0889
+100-7.png,GT mask: global gain,6.9280,2.4605,28.1364,0.9687,1.0000,0.0000
+100-7.png,GT mask: global gain + blend,6.0452,2.2564,28.9938,0.9737,1.0000,0.0000
+100-7.png,"GT mask: region relight, no blend",9.3186,3.0646,26.7253,0.9629,1.0000,0.0000
+100-7.png,GT mask: region relight + blend,8.2366,2.7825,27.8992,0.9690,1.0000,0.0000
+100-8.png,baseline: Otsu + global gain,4.7364,4.5071,22.6192,0.7117,0.7448,2.5355
+100-8.png,auto mask: global gain,5.6401,2.0030,29.7214,0.9688,0.9638,0.8821
+100-8.png,auto mask: global gain + blend,4.1909,1.6851,31.3477,0.9752,0.9638,0.8821
+100-8.png,"auto mask: region relight, no blend",5.1173,1.9042,30.3832,0.9681,0.9638,0.8821
+100-8.png,"auto mask: region relight, blend w/o guided filter",4.2509,1.6971,31.3568,0.9755,0.9638,0.8821
+100-8.png,auto mask: region relight + blend (full),4.1666,1.6774,31.4654,0.9761,0.9638,0.8821
+100-8.png,auto + simulated scribbles: full,4.2986,1.6310,31.7677,0.9764,0.9487,1.4699
+100-8.png,GT mask: global gain,6.4163,1.9052,30.3215,0.9682,1.0000,0.0000
+100-8.png,GT mask: global gain + blend,3.9879,1.3211,34.2605,0.9759,1.0000,0.0000
+100-8.png,"GT mask: region relight, no blend",5.8601,1.7844,31.0450,0.9673,1.0000,0.0000
+100-8.png,GT mask: region relight + blend,3.9289,1.3092,34.2767,0.9766,1.0000,0.0000
+101-1.png,baseline: Otsu + global gain,5.3410,5.3116,21.3806,0.4992,0.9230,1.0404
+101-1.png,auto mask: global gain,5.4462,5.2958,21.3906,0.5019,0.9271,0.9338
+101-1.png,auto mask: global gain + blend,4.7281,4.5145,22.9394,0.5160,0.9271,0.9338
+101-1.png,"auto mask: region relight, no blend",4.1092,5.1016,21.6382,0.5026,0.9271,0.9338
+101-1.png,"auto mask: region relight, blend w/o guided filter",3.3848,4.3318,23.1642,0.5166,0.9271,0.9338
+101-1.png,auto mask: region relight + blend (full),3.3295,4.2802,23.2785,0.5184,0.9271,0.9338
+101-1.png,auto + simulated scribbles: full,3.2806,4.2687,23.2965,0.5196,0.9195,1.1132
+101-1.png,GT mask: global gain,5.5385,4.1756,23.5250,0.5252,1.0000,0.0000
+101-1.png,GT mask: global gain + blend,4.6857,3.9795,24.0329,0.5287,1.0000,0.0000
+101-1.png,"GT mask: region relight, no blend",4.2686,3.9342,23.9657,0.5262,1.0000,0.0000
+101-1.png,GT mask: region relight + blend,3.2941,3.7156,24.4756,0.5314,1.0000,0.0000
+101-2.png,baseline: Otsu + global gain,7.5053,12.5418,13.3631,0.8562,0.1895,30.4639
+101-2.png,auto mask: global gain,4.5065,4.2174,23.4092,0.9150,0.8942,1.3434
+101-2.png,auto mask: global gain + blend,3.7327,3.6835,24.5355,0.9272,0.8942,1.3434
+101-2.png,"auto mask: region relight, no blend",4.0006,4.5960,22.4288,0.9040,0.8942,1.3434
+101-2.png,"auto mask: region relight, blend w/o guided filter",3.2908,3.8572,24.0495,0.9211,0.8942,1.3434
+101-2.png,auto mask: region relight + blend (full),3.2367,3.8211,24.1414,0.9217,0.8942,1.3434
+101-2.png,auto + simulated scribbles: full,3.2393,3.8478,24.1063,0.9216,0.8915,1.1271
+101-2.png,GT mask: global gain,5.1169,3.5660,24.7377,0.9283,1.0000,0.0000
+101-2.png,GT mask: global gain + blend,4.0103,3.3842,25.2033,0.9336,1.0000,0.0000
+101-2.png,"GT mask: region relight, no blend",4.5053,3.5104,24.9051,0.9260,1.0000,0.0000
+101-2.png,GT mask: region relight + blend,3.3752,3.2967,25.4327,0.9339,1.0000,0.0000
+101-3.png,baseline: Otsu + global gain,11.1759,11.0940,14.4982,0.7644,0.9574,1.9401
+101-3.png,auto mask: global gain,11.0891,11.0417,14.5325,0.7753,0.9565,1.9924
+101-3.png,auto mask: global gain + blend,10.7898,10.6483,14.8539,0.7837,0.9565,1.9924
+101-3.png,"auto mask: region relight, no blend",7.5994,9.4949,15.9425,0.7883,0.9565,1.9924
+101-3.png,"auto mask: region relight, blend w/o guided filter",7.4158,9.2014,16.2119,0.7974,0.9565,1.9924
+101-3.png,auto mask: region relight + blend (full),7.3390,9.1582,16.2516,0.7983,0.9565,1.9924
+101-3.png,auto + simulated scribbles: full,7.3904,9.1123,16.3522,0.8036,0.9797,0.8638
+101-3.png,GT mask: global gain,11.1566,10.5687,14.9062,0.7915,1.0000,0.0000
+101-3.png,GT mask: global gain + blend,10.8159,10.4070,15.0508,0.7940,1.0000,0.0000
+101-3.png,"GT mask: region relight, no blend",7.5472,9.0382,16.3702,0.8032,1.0000,0.0000
+101-3.png,GT mask: region relight + blend,7.2253,8.8954,16.5112,0.8083,1.0000,0.0000
+101-4.png,baseline: Otsu + global gain,5.7335,3.9989,24.0054,0.8581,0.8889,3.0392
+101-4.png,auto mask: global gain,5.8167,3.9628,24.0900,0.8812,0.9004,2.5355
+101-4.png,auto mask: global gain + blend,4.9074,3.2374,25.9734,0.8925,0.9004,2.5355
+101-4.png,"auto mask: region relight, no blend",5.3799,3.8189,24.3658,0.8797,0.9004,2.5355
+101-4.png,"auto mask: region relight, blend w/o guided filter",4.6898,3.1924,25.9865,0.8909,0.9004,2.5355
+101-4.png,auto mask: region relight + blend (full),4.5835,3.1285,26.1620,0.8931,0.9004,2.5355
+101-4.png,auto + simulated scribbles: full,3.6124,2.9311,26.9274,0.8962,0.9238,1.2665
+101-4.png,GT mask: global gain,5.5658,3.0154,26.6154,0.8975,1.0000,0.0000
+101-4.png,GT mask: global gain + blend,4.3833,2.6791,27.9232,0.9027,1.0000,0.0000
+101-4.png,"GT mask: region relight, no blend",4.8127,2.8207,27.1529,0.8954,1.0000,0.0000
+101-4.png,GT mask: region relight + blend,3.7189,2.5107,28.3672,0.9034,1.0000,0.0000
+102-1.png,baseline: Otsu + global gain,3.0829,4.0083,23.9460,0.7678,0.3715,7.0401
+102-1.png,auto mask: global gain,2.8433,3.5492,25.0990,0.8915,0.4317,5.6509
+102-1.png,auto mask: global gain + blend,2.7102,3.1562,26.2808,0.9032,0.4317,5.6509
+102-1.png,"auto mask: region relight, no blend",3.7323,4.0425,23.9103,0.8858,0.4317,5.6509
+102-1.png,"auto mask: region relight, blend w/o guided filter",3.2140,3.6851,24.8035,0.8964,0.4317,5.6509
+102-1.png,auto mask: region relight + blend (full),3.0022,3.5604,25.1524,0.8992,0.4317,5.6509
+102-1.png,auto + simulated scribbles: full,3.0669,3.6113,25.0106,0.9084,0.4068,4.9668
+102-1.png,GT mask: global gain,3.5329,1.6786,32.4287,0.9174,1.0000,0.0000
+102-1.png,GT mask: global gain + blend,3.2478,1.6483,32.6100,0.9220,1.0000,0.0000
+102-1.png,"GT mask: region relight, no blend",4.1156,1.7802,32.0301,0.9162,1.0000,0.0000
+102-1.png,GT mask: region relight + blend,3.8874,1.7230,32.1502,0.9216,1.0000,0.0000
+102-2.png,baseline: Otsu + global gain,2.7053,4.0680,23.8913,0.7650,0.4225,6.3259
+102-2.png,auto mask: global gain,2.6907,3.5818,24.9710,0.8891,0.4843,5.2366
+102-2.png,auto mask: global gain + blend,2.6558,3.1951,26.1310,0.9016,0.4843,5.2366
+102-2.png,"auto mask: region relight, no blend",3.4527,4.0901,23.8171,0.8830,0.4843,5.2366
+102-2.png,"auto mask: region relight, blend w/o guided filter",2.9881,3.7296,24.7090,0.8946,0.4843,5.2366
+102-2.png,auto mask: region relight + blend (full),2.7991,3.6034,25.0579,0.8975,0.4843,5.2366
+102-2.png,auto + simulated scribbles: full,3.3991,3.6524,24.9845,0.9055,0.4654,6.2555
+102-2.png,GT mask: global gain,3.2511,1.7260,32.2050,0.9149,1.0000,0.0000
+102-2.png,GT mask: global gain + blend,2.9541,1.6914,32.4366,0.9202,1.0000,0.0000
+102-2.png,"GT mask: region relight, no blend",3.6056,1.8037,32.0284,0.9134,1.0000,0.0000
+102-2.png,GT mask: region relight + blend,3.1621,1.7176,32.3589,0.9199,1.0000,0.0000
+102-3.png,baseline: Otsu + global gain,2.4768,4.1311,23.8494,0.7767,0.4922,5.6676
+102-3.png,auto mask: global gain,2.5303,3.6715,24.7882,0.8936,0.5536,4.7353
+102-3.png,auto mask: global gain + blend,2.5487,3.3018,25.8543,0.9052,0.5536,4.7353
+102-3.png,"auto mask: region relight, no blend",2.7432,3.9268,24.3371,0.8905,0.5536,4.7353
+102-3.png,"auto mask: region relight, blend w/o guided filter",2.5834,3.6137,25.1397,0.9010,0.5536,4.7353
+102-3.png,auto mask: region relight + blend (full),2.4774,3.5075,25.4418,0.9036,0.5536,4.7353
+102-3.png,auto + simulated scribbles: full,2.4244,3.6763,24.7785,0.9091,0.5316,4.5891
+102-3.png,GT mask: global gain,3.2318,1.7238,32.2752,0.9195,1.0000,0.0000
+102-3.png,GT mask: global gain + blend,3.0470,1.6968,32.5135,0.9247,1.0000,0.0000
+102-3.png,"GT mask: region relight, no blend",3.4785,1.7924,32.0935,0.9177,1.0000,0.0000
+102-3.png,GT mask: region relight + blend,3.0654,1.7013,32.4780,0.9243,1.0000,0.0000
+102-4.png,baseline: Otsu + global gain,4.8113,6.5893,19.3023,0.7452,0.7481,4.7383
+102-4.png,auto mask: global gain,4.9180,5.9210,20.1286,0.8811,0.8071,3.4165
+102-4.png,auto mask: global gain + blend,4.4549,5.5092,20.7996,0.8919,0.8071,3.4165
+102-4.png,"auto mask: region relight, no blend",5.0354,5.4682,21.1136,0.8867,0.8071,3.4165
+102-4.png,"auto mask: region relight, blend w/o guided filter",4.6781,5.1683,21.6189,0.8976,0.8071,3.4165
+102-4.png,auto mask: region relight + blend (full),4.5755,5.0989,21.7457,0.8986,0.8071,3.4165
+102-4.png,auto + simulated scribbles: full,4.1666,4.8026,22.1720,0.9004,0.8298,2.9384
+102-4.png,GT mask: global gain,4.4995,3.9875,23.5261,0.9123,1.0000,0.0000
+102-4.png,GT mask: global gain + blend,3.9057,3.8531,23.8425,0.9176,1.0000,0.0000
+102-4.png,"GT mask: region relight, no blend",3.4060,3.7857,24.1634,0.9145,1.0000,0.0000
+102-4.png,GT mask: region relight + blend,2.8364,3.6510,24.4554,0.9208,1.0000,0.0000
+102-5.png,baseline: Otsu + global gain,4.4666,6.3853,19.6168,0.7585,0.7761,4.8486
+102-5.png,auto mask: global gain,4.5321,5.7634,20.5243,0.8982,0.8235,3.6581
+102-5.png,auto mask: global gain + blend,4.0965,5.3176,21.2732,0.9116,0.8235,3.6581
+102-5.png,"auto mask: region relight, no blend",4.8405,5.3644,21.3565,0.9027,0.8235,3.6581
+102-5.png,"auto mask: region relight, blend w/o guided filter",4.5001,5.0264,21.9488,0.9158,0.8235,3.6581
+102-5.png,auto mask: region relight + blend (full),4.4106,4.9544,22.0868,0.9169,0.8235,3.6581
+102-5.png,auto + simulated scribbles: full,4.4210,4.7584,22.4719,0.9197,0.8618,2.7729
+102-5.png,GT mask: global gain,4.2468,3.7758,24.1429,0.9314,1.0000,0.0000
+102-5.png,GT mask: global gain + blend,3.6688,3.6259,24.5200,0.9375,1.0000,0.0000
+102-5.png,"GT mask: region relight, no blend",3.6043,3.6425,24.7097,0.9332,1.0000,0.0000
+102-5.png,GT mask: region relight + blend,3.0565,3.4861,25.0738,0.9402,1.0000,0.0000
+102-6.png,baseline: Otsu + global gain,3.0777,4.3746,23.3650,0.7880,0.4671,5.9128
+102-6.png,auto mask: global gain,2.9978,3.7659,24.5677,0.9387,0.5434,4.5759
+102-6.png,auto mask: global gain + blend,2.4015,3.2750,25.9736,0.9518,0.5434,4.5759
+102-6.png,"auto mask: region relight, no blend",4.1122,4.1349,23.7729,0.9353,0.5434,4.5759
+102-6.png,"auto mask: region relight, blend w/o guided filter",3.5508,3.7430,24.7415,0.9466,0.5434,4.5759
+102-6.png,auto mask: region relight + blend (full),3.3924,3.6101,25.1059,0.9488,0.5434,4.5759
+102-6.png,auto + simulated scribbles: full,2.8440,4.1849,23.5533,0.9540,0.5073,4.6105
+102-6.png,GT mask: global gain,3.0568,1.3913,34.7958,0.9695,1.0000,0.0000
+102-6.png,GT mask: global gain + blend,2.1978,1.2663,36.3269,0.9741,1.0000,0.0000
+102-6.png,"GT mask: region relight, no blend",3.0526,1.4212,34.7177,0.9678,1.0000,0.0000
+102-6.png,GT mask: region relight + blend,2.1662,1.2634,36.3162,0.9739,1.0000,0.0000
+102-7.png,baseline: Otsu + global gain,2.8167,4.4153,23.4214,0.7735,0.6040,5.5763
+102-7.png,auto mask: global gain,2.9089,3.9099,24.5608,0.9201,0.6665,4.5083
+102-7.png,auto mask: global gain + blend,2.5885,3.4192,25.9014,0.9349,0.6665,4.5083
+102-7.png,"auto mask: region relight, no blend",4.5823,4.5164,23.6369,0.9148,0.6665,4.5083
+102-7.png,"auto mask: region relight, blend w/o guided filter",4.2051,4.0754,24.6665,0.9283,0.6665,4.5083
+102-7.png,auto mask: region relight + blend (full),4.0974,3.9423,25.0145,0.9309,0.6665,4.5083
+102-7.png,auto + simulated scribbles: full,3.5168,4.5778,23.0983,0.9356,0.6345,4.7208
+102-7.png,GT mask: global gain,3.1626,1.7109,32.6492,0.9495,1.0000,0.0000
+102-7.png,GT mask: global gain + blend,2.4074,1.5512,33.9380,0.9565,1.0000,0.0000
+102-7.png,"GT mask: region relight, no blend",4.0089,1.9407,32.1688,0.9471,1.0000,0.0000
+102-7.png,GT mask: region relight + blend,3.1035,1.6997,33.8612,0.9555,1.0000,0.0000
+102-8.png,baseline: Otsu + global gain,2.8502,4.6190,22.9382,0.7359,0.6212,5.7396
+102-8.png,auto mask: global gain,2.8287,4.0638,24.0605,0.8902,0.6853,4.4705
+102-8.png,auto mask: global gain + blend,2.4559,3.5305,25.4574,0.9075,0.6853,4.4705
+102-8.png,"auto mask: region relight, no blend",3.3696,5.5934,21.4742,0.8819,0.6853,4.4705
+102-8.png,"auto mask: region relight, blend w/o guided filter",3.0485,5.0847,22.4001,0.8962,0.6853,4.4705
+102-8.png,auto mask: region relight + blend (full),3.0273,4.9183,22.7300,0.8983,0.6853,4.4705
+102-8.png,auto + simulated scribbles: full,3.4742,5.2890,21.7485,0.9049,0.6462,5.6130
+102-8.png,GT mask: global gain,3.3780,1.9217,31.4502,0.9223,1.0000,0.0000
+102-8.png,GT mask: global gain + blend,2.5909,1.7418,32.6258,0.9288,1.0000,0.0000
+102-8.png,"GT mask: region relight, no blend",4.0270,2.1114,31.2108,0.9204,1.0000,0.0000
+102-8.png,GT mask: region relight + blend,3.1753,1.8745,32.5467,0.9282,1.0000,0.0000
