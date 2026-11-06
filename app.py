@@ -121,33 +121,41 @@ with st.sidebar.expander("Ground Truth (Optional)", expanded=False):
         gt_m = np.array(Image.open(gt_mask_file).convert("L"))
         gt_mask = (gt_m > 127).astype(np.float32)
 
-# Algorithm Hyperparameters
+# Algorithm Pipeline Controls (Simplified for Clear Presentation)
 st.sidebar.markdown("---")
-st.sidebar.subheader("Algorithm Tuning")
+st.sidebar.subheader("🎛️ Pipeline Comparison Modes")
 
-with st.sidebar.expander("Module A: Detection Parameters", expanded=False):
-    detector_mode = st.selectbox(
-        "Detection Algorithm", ["Ours (Daylight Physics)", "Baseline (Otsu on L)"]
-    )
-    max_delta_a = st.slider("Max a* Shift (|Δa|)", 1.0, 10.0, 3.5, 0.5)
-    max_delta_b_pos = st.slider("Max b* Positive Shift (Δb_pos)", 0.5, 5.0, 2.5, 0.5)
-    min_l_ratio = st.slider("Min Luminance Drop Ratio (L_out / L_in)", 1.05, 2.0, 1.15, 0.05)
-    min_sep = st.slider("Min Separation (L units)", 5.0, 25.0, 10.0, 1.0)
-    soft_sigma = st.slider("Mask Softening Sigma", 0.5, 5.0, 1.0, 0.5)
+detector_mode = st.sidebar.selectbox(
+    "Module A: Detection",
+    ["Ours (Daylight Physics)", "Baseline (Otsu on L)"],
+    help="Compare our daylight physics invariance with naive Otsu thresholding.",
+)
 
-with st.sidebar.expander("Module C: Relighting Parameters", expanded=False):
-    relight_mode = st.selectbox(
-        "Relighting Method",
-        ["Surface-Aware Log-Boundary Ratio (Ours)", "Global Multiplicative Gain (Baseline)"],
-    )
-    max_gain = st.slider("Max Amplification Gain", 1.5, 10.0, 8.0, 0.5)
-    cluster_multisurface = st.checkbox("Enable Surface Clustering", value=True)
-    b_weight = st.slider("Blue Skylight Compensation Weight", 0.0, 1.0, 0.5, 0.1)
+relight_mode = st.sidebar.selectbox(
+    "Module C: Relighting",
+    ["Surface-Aware Log-Boundary Ratio (Ours)", "Global Multiplicative Gain (Baseline)"],
+    help="Compare surface-aware boundary illumination transfer with naive global scaling.",
+)
 
-with st.sidebar.expander("Module D: Penumbra Blending Parameters", expanded=False):
-    enable_blend = st.checkbox("Enable Penumbra Blending", value=True)
-    use_guided = st.checkbox("Use Guided Filter Edge Snapping", value=True)
-    penumbra_rad = st.slider("Penumbra Transition Radius (px)", 1, 15, 4, 1)
+enable_blend = st.sidebar.checkbox(
+    "Module D: Enable Penumbra Blending",
+    value=True,
+    help="Smoothly transitions the shadow boundary using edge-snapping guided filtering.",
+)
+
+# Optional Advanced Tuning (Kept cleanly collapsed with optimal defaults)
+with st.sidebar.expander("⚙️ Advanced Tuning (Optional)", expanded=False):
+    st.caption("Default parameters are pre-calibrated on the ISTD benchmark.")
+    penumbra_rad = st.slider("Penumbra Width (px)", 1, 15, 4, 1, help="Width of the transitional edge zone.")
+    b_weight = st.slider("Blue Skylight Compensation", 0.0, 1.0, 0.5, 0.1, help="Corrects blue ambient sky cast in outdoor shadows.")
+    use_guided = st.checkbox("Guided Filter Edge Snapping", value=True)
+    max_gain = 8.0
+    cluster_multisurface = True
+    max_delta_a = 3.5
+    max_delta_b_pos = 2.5
+    min_l_ratio = 1.15
+    min_sep = 10.0
+    soft_sigma = 1.0
 
 # Main Application Tabs
 if image_rgb is None:
@@ -307,7 +315,14 @@ with tab_interactive:
         x_max = st.slider("X Max (px)", x_min + 5, w, min(max(x_min + 10, def_x_max), w), 5)
         y_min = st.slider("Y Min (px)", 0, max(0, h - 10), min(def_y_min, max(0, h - 10)), 5)
         y_max = st.slider("Y Max (px)", y_min + 5, h, min(max(y_min + 10, def_y_max), h), 5)
-        grabcut_iters = st.slider("GrabCut Iterations", 1, 8, 3, 1)
+        grabcut_iters = st.slider(
+            "GrabCut Iterations",
+            1,
+            5,
+            3,
+            1,
+            help="Number of graph-cut optimization cycles. 3 iterations is the ideal sweet spot where boundaries converge.",
+        )
 
         scribbles = np.zeros((h, w), dtype=np.uint8)
         scribbles[y_min:y_max, x_min:x_max] = sub_type
@@ -354,14 +369,19 @@ with tab_evaluation:
         psnr_val = M.psnr(final_img, gt_image_rgb)
         ssim_val = M.ssim(final_img, gt_image_rgb)
 
-        st.markdown("### Reconstruction Quality vs Ground Truth")
+        st.success(
+            "🟢 **Live Image Metrics**: These metrics are dynamically computed right now "
+            "for the active output image compared against its ground truth."
+        )
+
+        st.markdown("### Image Reconstruction Quality vs Ground Truth")
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.metric("PSNR (Peak SNR)", f"{psnr_val:.2f} dB", delta=f"{psnr_val - 20:.2f} dB")
+            st.metric("PSNR (↑ Higher is better)", f"{psnr_val:.2f} dB", help="Peak Signal-to-Noise Ratio in dB.")
         with c2:
-            st.metric("SSIM (Structural Similarity)", f"{ssim_val:.4f}")
+            st.metric("SSIM (↑ Higher is better)", f"{ssim_val:.4f}", help="Structural Similarity Index (0 to 1).")
         with c3:
-            st.metric("RMSE in CIE LAB", f"{rmse_all:.2f}")
+            st.metric("LAB RMSE (↓ Lower is better)", f"{rmse_all:.2f}", help="Root Mean Square Error in perceptual CIE LAB color space.")
 
         if gt_mask is not None:
             if gt_mask.shape != (h, w):
@@ -370,14 +390,14 @@ with tab_evaluation:
             mask_iou = M.iou(auto_mask, gt_mask)
             mask_ber = M.ber(auto_mask, gt_mask)
 
-            st.markdown("### Shadow Region & Mask Segmentation Metrics")
+            st.markdown("### Shadow Segmentation Accuracy (Mask vs GT)")
             m_c1, m_c2, m_c3 = st.columns(3)
             with m_c1:
-                st.metric("Shadow Region RMSE (LAB)", f"{rmse_shadow:.2f}")
+                st.metric("Shadow Region RMSE (↓ Lower is better)", f"{rmse_shadow:.2f}", help="Error strictly inside the shadow zone.")
             with m_c2:
-                st.metric("Mask IoU", f"{mask_iou:.3f}")
+                st.metric("Mask IoU (↑ Higher is better)", f"{mask_iou:.3f}", help="Intersection over Union of shadow mask.")
             with m_c3:
-                st.metric("Mask Balanced Error Rate (BER)", f"{mask_ber:.1f}%")
+                st.metric("Mask Error Rate / BER (↓ Lower is better)", f"{mask_ber:.1f}%", help="Balanced Error Rate.")
     else:
         st.info(
             "Upload a shadow-free ground truth image from the sidebar to calculate "
