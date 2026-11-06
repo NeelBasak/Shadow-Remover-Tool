@@ -1,23 +1,51 @@
 # Shadow-Remover-Tool
-Course Project for EE604: Digital Image Processing.
 
-A single-image shadow detection and removal system featuring:
-- **Chroma-Consistent Detection**: Classical LAB luminance thresholding coupled with localized normalized chromaticity consistency filtering to reject inherently dark non-shadow objects.
-- **Interactive Scribble Refinement**: Graph cut (`cv2.grabCut`) guided by user scribbles (definite/probable shadow vs. lit) for rapid manual correction.
-- **Surface-Aware Region-Matched Relighting**: Color-consistent clustering and paired boundary-strip log-domain illumination ratio estimation to relight multi-surface shadows without cross-surface color contamination.
-- **Penumbra-Aware Blending**: Grayscale guided filter edge snapping across dilated penumbra regions to eliminate boundary seams and halo artifacts.
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://streamlit.io/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Course](https://img.shields.io/badge/Course-EE604%20Image%20Processing-orange.svg)](https://www.iitk.ac.in/)
+[![Institute](https://img.shields.io/badge/IIT-Kanpur-red.svg)](https://www.iitk.ac.in/)
+
+**EE604 Course Project | Indian Institute of Technology Kanpur**  
+*A lightweight, non-deep learning classical image processing pipeline for single-image shadow detection, interactive human-in-the-loop refinement, surface-aware radiometric relighting, and penumbra-aware guided blending.*
 
 ---
 
-## Repository Structure
+## 👥 Authors (Group 1)
+* **Aayush Jhawar** (230028)
+* **Darsh Patil** (230343)
+* **Harshada Rajhans** (230456)
+* **Neel Basak** (230687)
+* **Sanchit Garg** (230908)
+
+---
+
+## 🌟 Key Highlights & Proposed Innovations
+
+1. **Module A — Daylight Physics-Based Detection (`src/detect.py`)**:
+   - Rejects inherently dark non-shadow materials (e.g., black shoes, dark asphalt) using daylight chromaticity ratios ($c_1c_2c_3$ space) and Planckian locus shifts.
+   - Achieves **0.0% false positive rate** on dark objects where standard Otsu produces 100% false alarms.
+2. **Module B — Interactive GrabCut Scribble Refinement (`src/refine.py`)**:
+   - Allows users to rescue failure cases in ambiguous scenes (e.g., specular reflections, fine missed tree branches, over-detected roads) using bounding boxes or scribbles.
+   - Formulates shadow mask extraction as graph cuts with hard boundary seeds; converges in **$\approx 300\text{ ms}$ on CPU** with **$99.99\%$ missed shadow recovery**.
+3. **Module C — Surface-Aware Radiometric Relighting (`src/remove.py`)**:
+   - Operates in linear radiometric RGB space (IEC 61966-2-1 inverse gamma expansion).
+   - Estimates paired inner/outer boundary-strip log-domain illumination ratios ($\log \gamma_c = \text{median}(\log I_{\text{outer}}) - \text{median}(\log I_{\text{inner}})$).
+   - Employs spatially coherent multi-surface clustering to prevent cross-surface color contamination, plus additive $b^*$ blue skylight compensation.
+4. **Module D — Penumbra-Aware Guided Blending (`src/blend.py`)**:
+   - Restores the transitional penumbra band without harsh seam artifacts or halos using edge-snapping Grayscale Guided Filtering.
+   - Yields a **100% paired win rate** and **+3.77 dB PSNR gain** over unblended reconstruction.
+
+---
+
+## 📂 Repository Structure
 
 ```
 Shadow-Remover-Tool/
 ├── app.py                    # Interactive demo web application (Streamlit)
-├── try_it.py                 # Fast command-line demo visualizer (outputs to outputs/)
+├── try_it.py                 # Fast command-line visualizer (outputs to outputs/)
 ├── README.md                 # Project documentation and quickstart
 ├── requirements.txt          # Python dependencies
-├── packages.txt              # Cloud container Linux dependencies
+├── packages.txt              # Cloud container Linux dependencies (Streamlit Cloud)
 ├── src/                      # Core algorithm engine (Modules A, B, C, D)
 │   ├── detect.py             # Module A: shadow detection (daylight physics + Otsu)
 │   ├── refine.py             # Module B: GrabCut interactive scribble refinement
@@ -25,49 +53,81 @@ Shadow-Remover-Tool/
 │   ├── blend.py              # Module D: guided-filter penumbra blending
 │   ├── pipeline.py           # End-to-end pipeline wrapper & CLI
 │   └── utils.py              # Guided filter, color conversion, I/O helpers
-├── docs/                     # System design, tracker, and technical specifications
-│   ├── DESIGN.md             # System architecture & mathematical formulation
-│   ├── PROGRESS.md           # Task tracker and contribution log
-│   └── SUGGESTIONS.md        # Technical analysis and experimental notes
-├── report/                   # CVPR 2022 LaTeX report, figures, bibtex, & Overleaf package
+├── data/                     # Demo presets and test datasets
+│   └── demo_samples/         # Bundled test scenes, ground truth images, and masks
 ├── experiments/              # Benchmarks, component unit tests, and metrics
-├── data/                     # Bundled demo presets and test datasets
-├── outputs/                  # Generated demo comparison strips
+│   ├── metrics.py            # Quantitative evaluation (PSNR, SSIM, LAB RMSE, IoU, BER)
+│   ├── test_components.py    # Unit tests & verification for Modules A, B, C, D
+│   └── run_eval.py           # Batch dataset evaluation runner
+├── outputs/                  # Visual output strips generated by try_it.py
 └── tools/                    # Project utilities (Overleaf zip builder, figure generator)
 ```
 
 ---
 
-## Installation
+## ⚡ Quickstart
+
+### 1. Installation
 
 Ensure you have Python 3.10+ installed:
 
 ```bash
+git clone https://github.com/<your-username>/Shadow-Remover-Tool.git
+cd Shadow-Remover-Tool
 pip install -r requirements.txt
 ```
 
----
+### 2. Launch Interactive Streamlit Web App
 
-## Usage
-
-### 1. Launch Interactive Demo Web App (Recommended for Demo)
 ```bash
 streamlit run app.py
 ```
-The web application provides preset scenes (dark object rejection, multi-surface shadows, textured soft penumbra, specular reflection failure cases), interactive parameter tuning, GrabCut scribble correction, side-by-side comparison, and one-click PNG downloads.
 
-### 2. Run End-to-End Pipeline CLI
+The web application features:
+* **Curated Demo Presets**:
+  * **Standard Benchmark**: Clean single-surface concrete (`100-1`), high contrast (`100-4`), fine penumbra (`100-5`), complex textures (`101-1`).
+  * **Dark Object Rejection (Otsu Failure)**: Black shoe demo and dark ground material (`103-5`).
+  * **Failure Cases & Scribble Rescue**: Missed branch shadow (`100-6`), dark street over-detection (`102-1`), specular reflection (`Demo 4`).
+* **Live Algorithm Comparisons**: Toggle between *Ours* and *Otsu Detection*, *Surface-Aware* and *Global Gain Relighting*, or switch *Penumbra Blending* on/off.
+* **Live Quantitative Evaluation**: Real-time PSNR, SSIM, LAB RMSE, IoU, and BER recomputed on the fly against paired ground truth images.
+
+### 3. Run Command-Line Visualizer
+
+To process preset benchmark images and generate side-by-side comparison strips into `outputs/`:
+
 ```bash
-python -m src.pipeline path/to/input.jpg path/to/output.png [--mask path/to/gt_mask.png]
+python try_it.py
 ```
 
-### 3. Run Component Audit and Benchmark Suite
-To test all four pipeline modules against baseline implementations across dark object rejection, scribble refinement, multi-surface relighting, and penumbra blending:
+### 4. Run End-to-End CLI on Custom Image
+
+```bash
+python -m src.pipeline path/to/input.png path/to/output.png [--mask path/to/gt_mask.png]
+```
+
+### 5. Run Verification Benchmark Suite
+
+To execute the unit tests and verify all four modules against standard baselines:
+
 ```bash
 python experiments/test_components.py
 ```
 
-### 4. Evaluate on Benchmark Datasets (ISTD / SRD)
-```bash
-python -m experiments.run_eval --root data/ISTD/test --limit 50 --out experiments/results
-```
+---
+
+## 📊 Quantitative Benchmarks
+
+Evaluated on real benchmark scenes from the ISTD dataset against classical baselines:
+
+| Pipeline Stage / Component | Baseline Implementation | Proposed Method (Ours) | Gain / Efficacy |
+| :--- | :--- | :--- | :--- |
+| **Module A: Dark Object Rejection** | Otsu Thresholding (100% False Positive) | Daylight Invariant Filtering | **0.0% False Positives** ($\text{IoU} = 0.997$) |
+| **Module B: Scribble Rescue (100-6)** | Automated Detection (8,671 px missed) | GrabCut Constraint ($\approx 300\text{ ms}$) | **1 px missed** ($99.99\%$ recovery) |
+| **Module C: Multi-Surface Relighting** | Global Gain (Color Cast, RMSE: 12.95) | Surface-Aware Boundary Strip | **RMSE: 10.77** (Texture Matched) |
+| **Module D: Penumbra Blending** | Unblended Boundary (PSNR: 22.98 dB) | Guided-Filter Edge Snapping | **PSNR: 26.75 dB** (+3.77 dB gain) |
+
+---
+
+## 📜 License
+
+This project is developed for educational and research purposes as part of the EE604 Course Project at IIT Kanpur.
