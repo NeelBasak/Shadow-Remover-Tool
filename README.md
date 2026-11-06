@@ -13,27 +13,27 @@ A single-image shadow detection and removal system featuring:
 
 ```
 Shadow-Remover-Tool/
-├── DESIGN.md                 # System architecture, module design, & mathematical formulation
-├── PROGRESS.md               # Task tracker and contribution log
+├── app.py                    # Interactive demo web application (Streamlit)
+├── try_it.py                 # Fast command-line demo visualizer (outputs to outputs/)
 ├── README.md                 # Project documentation and quickstart
-├── SUGGESTIONS.md            # In-depth architectural analysis and experimental findings
-├── report/                   # CVPR 2022 LaTeX write-up, figures, bibtex, & Overleaf package
 ├── requirements.txt          # Python dependencies
-├── src/
-│   ├── detect.py             # Module A: shadow detection (Otsu + chroma filtering)
+├── packages.txt              # Cloud container Linux dependencies
+├── src/                      # Core algorithm engine (Modules A, B, C, D)
+│   ├── detect.py             # Module A: shadow detection (daylight physics + Otsu)
 │   ├── refine.py             # Module B: GrabCut interactive scribble refinement
-│   ├── remove.py             # Module C: surface-aware log-boundary relighting
+│   ├── remove.py             # Module C: surface-aware radiometric relighting
 │   ├── blend.py              # Module D: guided-filter penumbra blending
 │   ├── pipeline.py           # End-to-end pipeline wrapper & CLI
 │   └── utils.py              # Guided filter, color conversion, I/O helpers
-├── experiments/
-│   ├── metrics.py            # Evaluation metrics (RMSE in LAB, PSNR, SSIM, IoU, BER)
-│   ├── test_components.py    # Synthetic component audit & benchmark test suite
-│   ├── run_eval.py           # Evaluation script for ISTD/SRD datasets
-│   └── results/              # Output tables and figures
-├── data/
-│   └── demo_samples/         # Preloaded preset demo images for live demo
-└── app.py                    # Interactive demo web application (Streamlit)
+├── docs/                     # System design, tracker, and technical specifications
+│   ├── DESIGN.md             # System architecture & mathematical formulation
+│   ├── PROGRESS.md           # Task tracker and contribution log
+│   └── SUGGESTIONS.md        # Technical analysis and experimental notes
+├── report/                   # CVPR 2022 LaTeX report, figures, bibtex, & Overleaf package
+├── experiments/              # Benchmarks, component unit tests, and metrics
+├── data/                     # Bundled demo presets and test datasets
+├── outputs/                  # Generated demo comparison strips
+└── tools/                    # Project utilities (Overleaf zip builder, figure generator)
 ```
 
 ---

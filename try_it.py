@@ -29,6 +29,8 @@ labels = ["input", "detected mask", "relit (no blend)", "final"]
 for p, t in zip(panels, labels):
     cv2.putText(p, t, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
 
-out = Path(__file__).parent / f"{Path(sys.argv[1]).stem}_result.png"
+out_dir = Path(__file__).parent / "outputs"
+out_dir.mkdir(exist_ok=True)
+out = out_dir / f"{Path(sys.argv[1]).stem}_result.png"
 save_image(out, np.hstack(panels))
 print(f"Saved {out}")
