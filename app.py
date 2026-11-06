@@ -75,9 +75,15 @@ elif preset_choice and PRESETS[preset_choice] is not None:
         pil_img = Image.open(img_path).convert("RGB")
         image_rgb = np.array(pil_img)
 
-        # Check for matching ground truths in ISTD test folders
-        gt_img_path = Path(__file__).parent / "data" / "ISTD_Dataset" / "test" / "test_C" / preset_file
-        gt_mask_path = Path(__file__).parent / "data" / "ISTD_Dataset" / "test" / "test_B" / preset_file
+        # Check for matching ground truths in demo_samples or ISTD test folders
+        base_stem = Path(preset_file).stem
+        gt_img_path = DATA_DIR / f"{base_stem}_gt.png"
+        gt_mask_path = DATA_DIR / f"{base_stem}_mask.png"
+        if not gt_img_path.exists():
+            gt_img_path = Path(__file__).parent / "data" / "ISTD_Dataset" / "test" / "test_C" / preset_file
+        if not gt_mask_path.exists():
+            gt_mask_path = Path(__file__).parent / "data" / "ISTD_Dataset" / "test" / "test_B" / preset_file
+
         if gt_img_path.exists():
             gt_image_rgb = np.array(Image.open(gt_img_path).convert("RGB"))
         if gt_mask_path.exists():
@@ -89,6 +95,13 @@ else:
     if first_preset.exists():
         pil_img = Image.open(first_preset).convert("RGB")
         image_rgb = np.array(pil_img)
+        gt_img_path = DATA_DIR / "100-1_gt.png"
+        gt_mask_path = DATA_DIR / "100-1_mask.png"
+        if gt_img_path.exists():
+            gt_image_rgb = np.array(Image.open(gt_img_path).convert("RGB"))
+        if gt_mask_path.exists():
+            gt_m = np.array(Image.open(gt_mask_path).convert("L"))
+            gt_mask = (gt_m > 127).astype(np.float32)
 
 # Optional Ground Truth Upload for Metrics
 with st.sidebar.expander("Ground Truth (Optional)", expanded=False):

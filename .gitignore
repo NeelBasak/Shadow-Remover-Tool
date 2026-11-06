@@ -21,6 +21,7 @@ data/*
 
 # Generated outputs from try_it.py and eval
 *_result.png
+outputs/
 experiments/results*/*.png
 experiments/results*/worst/
 experiments/eval*
