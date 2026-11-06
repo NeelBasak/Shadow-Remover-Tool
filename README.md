@@ -2,7 +2,7 @@
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://streamlit.io/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Course](https://img.shields.io/badge/Course-EE604%20Digital%20Image%20Processing-orange.svg)](https://www.iitk.ac.in/)
+[![Course](https://img.shields.io/badge/Course-EE604%20Image%20Processing-orange.svg)](https://www.iitk.ac.in/)
 [![Institute](https://img.shields.io/badge/IIT-Kanpur-red.svg)](https://www.iitk.ac.in/)
 
 **EE604 Course Project | Indian Institute of Technology Kanpur**  
