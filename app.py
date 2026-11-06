@@ -48,10 +48,18 @@ st.sidebar.header("🕹️ Controls & Settings")
 DATA_DIR = Path(__file__).parent / "data" / "demo_samples"
 PRESETS = {
     "Select a preset...": None,
-    "1. Single Surface Outdoor Shadow (100-1)": "100-1.png",
+    "--- 🌟 Standard Benchmark Presets ---": None,
+    "1. Single Surface Concrete Shadow (100-1)": "100-1.png",
     "2. High-Contrast Concrete Shadow (100-4)": "100-4.png",
     "3. Fine-Penumbra Pavement Shadow (100-5)": "100-5.png",
     "4. Challenging Occluder Scene (101-1)": "101-1.png",
+    "--- 🛑 Dark Object Rejection (Ours vs. Otsu Failure) ---": None,
+    "5. Dark Object Rejection: Black Shoe (Otsu fails 100%, Ours 0%)": "1_dark_object_rejection.png",
+    "6. Dark Ground Material (103-5: Otsu false detects 173k px)": "103-5.png",
+    "--- ✏️ Failure Cases & Human Scribble Rescue (Module B) ---": None,
+    "7. Failure Case: Missed Branch Shadow (100-6: Auto misses 8.6k px, Scribble rescues)": "100-6.png",
+    "8. Failure Case: Dark Asphalt Road (102-1: Auto over-detects road, Scribble rescues)": "102-1.png",
+    "9. Failure Case: Specular Ambiguity (Demo 4: Auto detects 0%, Scribble recovers)": "4_specular_failure_case.png",
 }
 
 # Source Selection
@@ -169,6 +177,14 @@ else:
 with tab_pipeline:
     st.subheader("Automated Shadow Removal Stages")
 
+    if preset_choice and ("1_dark_object" in preset_choice or "103-5" in preset_choice):
+        st.info(
+            "💡 **Live Demo Tip (Dark Object Rejection):** Open the sidebar under "
+            "**Module A: Detection Parameters** and toggle the dropdown between "
+            "**'Ours (Daylight Physics)'** and **'Baseline (Otsu on L)'** to demonstrate how Otsu flags dark non-shadow "
+            "materials, whereas our daylight chromaticity check rejects them cleanly!"
+        )
+
     # Compute Relit & Final Blended
     if relight_mode == "Surface-Aware Log-Boundary Ratio (Ours)":
         relit_img = remove(
@@ -253,17 +269,44 @@ with tab_interactive:
 
     with scrib_col1:
         st.markdown("**1. Configure Correction Region**")
+
+        # Determine smart pre-aligned defaults based on the chosen preset
+        default_action_idx = 0
+        def_x_min, def_x_max = int(w * 0.1), int(w * 0.4)
+        def_y_min, def_y_max = int(h * 0.1), int(h * 0.4)
+        demo_hint = None
+
+        if preset_choice and "100-6" in preset_choice:
+            default_action_idx = 1  # Add Shadow
+            def_x_min, def_x_max = 440, min(610, w)
+            def_y_min, def_y_max = 30, min(295, h)
+            demo_hint = "🎯 **Scene 100-6 Pre-aligned:** The red box is pre-positioned over the missed branch shadow. Notice how GrabCut immediately pulls in the entire missed shadow (~99.9% recovery)!"
+        elif preset_choice and "102-1" in preset_choice:
+            default_action_idx = 0  # Remove Shadow
+            def_x_min, def_x_max = 50, min(590, w)
+            def_y_min, def_y_max = 350, min(475, h)
+            demo_hint = "🎯 **Scene 102-1 Pre-aligned:** The green box marks the dark asphalt road as LIT. Notice how GrabCut strips out the false detection on the street!"
+        elif preset_choice and "4_specular" in preset_choice:
+            default_action_idx = 1  # Add Shadow
+            def_x_min, def_x_max = int(w * 0.2), int(w * 0.8)
+            def_y_min, def_y_max = int(h * 0.25), int(h * 0.75)
+            demo_hint = "🎯 **Specular Ambiguity Pre-aligned:** The red box guides GrabCut to recover the shadow band that was completely missed due to specular reflection!"
+
+        if demo_hint:
+            st.info(demo_hint)
+
         action_type = st.radio(
             "Correction Action",
             ["Mark False Positive as LIT (Remove Shadow)", "Mark Undetected as SHADOW (Add Shadow)"],
+            index=default_action_idx,
         )
         sub_type = SCRIB_LIT if "LIT" in action_type else SCRIB_SHADOW
 
         # Coordinates for correction box
-        x_min = st.slider("X Min (px)", 0, w, int(w * 0.1), 5)
-        x_max = st.slider("X Max (px)", x_min + 5, w, int(w * 0.4), 5)
-        y_min = st.slider("Y Min (px)", 0, h, int(h * 0.1), 5)
-        y_max = st.slider("Y Max (px)", y_min + 5, h, int(h * 0.4), 5)
+        x_min = st.slider("X Min (px)", 0, max(0, w - 10), min(def_x_min, max(0, w - 10)), 5)
+        x_max = st.slider("X Max (px)", x_min + 5, w, min(max(x_min + 10, def_x_max), w), 5)
+        y_min = st.slider("Y Min (px)", 0, max(0, h - 10), min(def_y_min, max(0, h - 10)), 5)
+        y_max = st.slider("Y Max (px)", y_min + 5, h, min(max(y_min + 10, def_y_max), h), 5)
         grabcut_iters = st.slider("GrabCut Iterations", 1, 8, 3, 1)
 
         scribbles = np.zeros((h, w), dtype=np.uint8)
