@@ -94,52 +94,66 @@ plt.close()
 print("Saved report/figures/teaser.png")
 
 # -------------------------------------------------------------
-# 3. Failure Mode & Interactive Scribble Correction Figure
+# 3. Failure Mode & Interactive Scribble Correction Figure (Scene 100-6)
 # -------------------------------------------------------------
-orig_102 = load_image(test_a / "102-1.png")
-gt_m_102 = load_mask(test_b / "102-1.png")
-clean_102 = load_image(test_c / "102-1.png")
-if clean_102.shape != orig_102.shape:
-    clean_102 = cv2.resize(clean_102, (orig_102.shape[1], orig_102.shape[0]))
-
 from src.detect import detect
-from src.refine import refine, SCRIB_LIT
+from src.refine import refine, SCRIB_SHADOW
 from src.remove import remove
 from src.blend import blend
 
-auto_m_102 = detect(orig_102)
+img_100_6 = load_image(test_a / "100-6.png")
+gt_100_6 = load_mask(test_b / "100-6.png")
+auto_m_6 = detect(img_100_6)
 
-h, w = orig_102.shape[:2]
-scrib_102 = np.zeros((h, w), dtype=np.uint8)
-cv2.circle(scrib_102, (int(w * 0.75), int(h * 0.8)), 25, int(SCRIB_LIT), -1)
-refined_m_102 = refine(orig_102, auto_m_102, scrib_102)
+# Unrefined result (leaves dark un-relighted patch)
+unrefined_relit = remove(img_100_6, auto_m_6)
+unrefined_final = blend(img_100_6, unrefined_relit, auto_m_6)
 
-res_auto_102 = blend(orig_102, remove(orig_102, auto_m_102), auto_m_102)
-res_scrib_102 = blend(orig_102, remove(orig_102, refined_m_102), refined_m_102)
+# User scribble on the missed shadow area
+missed_6 = (gt_100_6 > 0.5) & (auto_m_6 <= 0.5)
+pts_6 = np.argwhere(missed_6)
+center_6 = pts_6[len(pts_6) // 2]
 
-stroke_vis = orig_102.copy()
-stroke_vis[scrib_102 == SCRIB_LIT] = [0, 255, 0]
+h_6, w_6 = img_100_6.shape[:2]
+scrib_6 = np.zeros((h_6, w_6), dtype=np.uint8)
+cv2.circle(scrib_6, (int(center_6[1]), int(center_6[0])), 22, int(SCRIB_SHADOW), -1)
 
-fig, axes = plt.subplots(1, 5, figsize=(11, 2.3), dpi=300)
-f_titles = [
-    "(a) Input (Scene 102)",
-    "(b) Auto Mask (FP on Road)",
-    "(c) User Scribble (Green)",
-    "(d) Refined Mask",
-    "(e) Final Shadow-Free"
+# Refined result
+refined_m_6 = refine(img_100_6, auto_m_6, scrib_6)
+refined_relit = remove(img_100_6, refined_m_6)
+refined_final = blend(img_100_6, refined_relit, refined_m_6)
+
+# Visualize user stroke
+stroke_vis_6 = img_100_6.copy()
+stroke_mask_6 = scrib_6 == SCRIB_SHADOW
+stroke_vis_6[stroke_mask_6] = [255, 30, 30]
+border_6 = cv2.dilate(stroke_mask_6.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))) - stroke_mask_6.astype(np.uint8)
+stroke_vis_6[border_6 > 0] = [255, 255, 255]
+
+fig, axes = plt.subplots(1, 5, figsize=(12, 2.5), dpi=300)
+panels_6 = [
+    img_100_6,
+    overlay_mask(img_100_6, auto_m_6, color=(255, 0, 0), alpha=0.5),
+    unrefined_final,
+    stroke_vis_6,
+    refined_final
+]
+f_titles_6 = [
+    "(a) Input Photo",
+    "(b) Auto-Mask (Missed Patch)",
+    "(c) Auto Result (Dark Patch Left)",
+    "(d) User Stroke (Red = Shadow)",
+    "(e) Rescued Final Result"
 ]
 
-axes[0].imshow(orig_102)
-axes[1].imshow(overlay_mask(orig_102, auto_m_102, color=(255, 0, 0), alpha=0.5))
-axes[2].imshow(stroke_vis)
-axes[3].imshow(overlay_mask(orig_102, refined_m_102, color=(0, 255, 255), alpha=0.5))
-axes[4].imshow(res_scrib_102)
-
 for i in range(5):
-    axes[i].set_title(f_titles[i], fontsize=8)
+    axes[i].imshow(panels_6[i])
+    axes[i].set_title(f_titles_6[i], fontsize=8, fontweight="bold")
     axes[i].axis("off")
 
 plt.tight_layout()
 plt.savefig(fig_dir / "scribble_refine.png", bbox_inches="tight")
+plt.close()
+print("Saved report/figures/scribble_refine.png")
 plt.close()
 print("Saved report/figures/scribble_refine.png")
