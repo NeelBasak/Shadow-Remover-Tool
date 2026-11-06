@@ -40,3 +40,5 @@ Thumbs.db
 !examples/*.png
 !examples/*.jpg
 !data/demo_samples/*
+
+docs/
