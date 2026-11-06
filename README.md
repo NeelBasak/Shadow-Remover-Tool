@@ -11,11 +11,11 @@
 ---
 
 ## 👥 Authors (Group 1)
-* **Darsh Patil** (230343)
-* **Neel Basak** (230687)
 * **Aayush Jhawar** (230028)
+* **Darsh Patil** (230343)
 * **Harshada Rajhans** (230456)
-* **Sanchit Singla** (230908)
+* **Neel Basak** (230687)
+* **Sanchit Garg** (230908)
 
 ---
 
